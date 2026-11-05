@@ -72,3 +72,17 @@ results identify themselves as snapshots. All DB/cache/backup files stay ignored
 No distributed queue, scheduler, resume processing, AI inference, server, email,
 credential collection or application submission is introduced. Those remain later
 phases requiring authorization. [Phase 2.5 details and limitations](phase-2-5.md).
+
+
+## Phase 3 extension
+
+The optional `serve` command lazily imports FastAPI/Jinja2. Discovery commands retain
+their standard-library architecture. `dashboard.py` enforces loopback, authentication,
+sessions, CSRF, host/origin and request-body boundaries. `resume/extract.py` validates
+and extracts documents in bounded subprocesses. `resume/store.py` keeps a separate
+private SQLite schema for originals, facts/audit history, settings and immutable
+package versions; existing jobs are only read. `resume/intelligence.py` performs
+explainable matching and literal verified-fact generation. Optional loopback Ollama
+output can reorder fact IDs only. `resume/documents.py` exports in memory; templates
+are escaped and contain no external resources. See phase-3.md for details/limitations.
+No submission or messaging service is present.

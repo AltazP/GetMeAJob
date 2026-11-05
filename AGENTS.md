@@ -162,3 +162,22 @@ databases/caches/backups and all personal documents ignored. Only the reviewed p
 examples/employers.example.csv is exempt from CSV exclusions. Commit tested milestones
 and ask before pushing. Preserve v0.2.0; do not tag a new release without instruction.
 Do not start Phase 3.5 or later.
+
+
+## Phase 3 implementation and release handoff
+
+Phase 3 is implemented locally. See docs/phase-3.md for exact behavior/limitations,
+PROJECT_STATE.md for test and Git state, and docs/PRODUCT_ROADMAP.md for future scope.
+The browser interface uses project-local free dependencies, FastAPI/Jinja2, separate
+private/profiles.sqlite3, scrypt authentication, server-side sessions, CSRF, exact
+loopback Host/Origin controls, bounded document extraction and evidence-only generation.
+Do not weaken these boundaries. Pending/rejected facts must never become generated
+claims. User edits remain explicitly reviewable. Local AI may reorder verified fact
+IDs only, never invent prose. No model downloads or external service activation.
+
+Start with `.venv/bin/python -m getmeajob serve`; stop with Control+C. Never run it
+with an external bind address. No submission/messaging routes may be added in this
+phase. Preserve private originals and immutable package/history versions. The job
+store is read-only from the dashboard. Full tests need requirements-phase3.txt.
+Phase 3 commits are local only; ask before a push. Propose v0.3.0 but do not create
+or publish it without release approval. Do not start Phase 3.5 or later.

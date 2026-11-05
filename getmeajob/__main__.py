@@ -97,9 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "employers":
             return employer_cli.run(args, settings)
         if args.command is None:
-            print(f"GetMeAJob {__version__} — Phase 2 job discovery ready; Phase 2.5 employer registry available.")
-            print(f"Future dashboard address: http://{settings.host}:{settings.port} (not running).")
-            print("Use 'search --config config/settings.toml' for real jobs or 'demo' for synthetic listings.")
+            print(f"GetMeAJob {__version__} — Phase 2 job discovery ready; Phase 2.5 employer registry and Phase 3 resume interface available.")
+            print(f"Local dashboard address: http://{settings.host}:{settings.port} (not running).")
+            print("Use 'search --config config/settings.toml' for real jobs or 'demo' for synthetic listings; use 'serve' for the resume interface.")
             return 0
         if args.limit < 1:
             raise ConfigurationError("--limit must be at least 1.")

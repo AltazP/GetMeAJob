@@ -3,7 +3,7 @@
 A free, private, local-first job-search and application assistant for macOS.
 It runs directly on your Mac, independently of Codex, with no paid APIs or hosting.
 
-## Current status: Phase 2.5 employer discovery and source expansion
+## Current status: Phase 3 local resume intelligence
 
 Real job discovery works through the public Greenhouse, Lever and Ashby job-posting APIs.
 Searches use configured boards or the growing verified employer registry, apply your filters, store
@@ -12,9 +12,38 @@ postings in SQLite and display unique matching jobs in Terminal. These APIs do
 API examples, not a personalized list of recommended employers.
 
 An offline demo uses clearly fictional employers and an in-memory database.
-Resume matching, cover letters, email, dashboard, scheduling, autofill and submission
-remain future phases. Running the application with no subcommand prints a readiness
+Resume upload, verified profiles, explainable matching, reviewable letters and package
+downloads now work in the local browser interface. Email, scheduling, outreach, autofill
+and submission remain future phases. Running the application with no subcommand prints a readiness
 message; it does not start a server.
+
+## Start the private resume interface
+
+Your existing environment is ready:
+
+```sh
+cd ~/Projects/GetMeAJob
+.venv/bin/python -m getmeajob serve
+```
+
+On first start, open the one-time setup link printed in Terminal and create your
+local password. Later use **http://127.0.0.1:8000**. Keep Terminal open; stop with
+**Control+C**. Resume upload, fact verification, resume versions/defaults, matching,
+letter editing and TXT/DOCX/PDF/ZIP downloads are browser-based.
+
+On a fresh checkout, first install the free project-local dependencies:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-phase3.txt
+```
+
+Personal data stays in ignored `private/profiles.sqlite3`. Generated claims use only
+facts you explicitly verify. Scores indicate relevance, not hiring probability.
+Nothing is submitted. Optional local AI only reorders verified facts using an existing
+local model; no model or service is installed or started automatically.
+Read [Phase 3 setup, security and limitations](docs/phase-3.md),
+[project state](PROJECT_STATE.md) and [the complete roadmap](docs/PRODUCT_ROADMAP.md).
 
 ## Discover employers automatically
 
@@ -41,13 +70,13 @@ Read [the Phase 2.5 guide](docs/phase-2-5.md) for CSV imports, source/provider c
 offline/dry-run commands, settings, exact verification rules and limitations, and
 [the architecture](docs/architecture.md) for the additive migration design. Existing
 jobs are preserved. Fresh snapshots avoid immediate duplicate board downloads.
-No Phase 3 work has begun.
+Phase 3 is implemented locally; later phases have not begun.
 
 ## Run it
 
 Requirements: macOS, Python 3.11+ and Git for development. Development was verified
-on Apple Silicon with Python 3.12.6. The application and tests use only Python's
-standard library, including SQLite; no package downloads or API keys are required.
+on Apple Silicon with Python 3.12.6. Discovery uses the standard library. The optional Phase 3 interface uses free Python
+packages installed only in .venv. No API keys or paid services are required.
 
 Run these commands in Terminal:
 
@@ -226,7 +255,7 @@ errors; verification is never disabled.
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 131 offline automated tests cover configuration, normalization, filtering,
+The 146 offline automated tests cover configuration, normalization, filtering,
 locations, SQLite persistence and timestamps, deduplication, source isolation,
 pagination, HTTP failures and rate limits, TLS verification, terminal safety and CLI
 behavior. Tests use synthetic data and no accounts or network access.
@@ -250,7 +279,7 @@ employer leads. LinkedIn, Indeed, Workday and arbitrary custom job-page parsing 
 unsupported. Discovery is bounded and cannot find every employer; no authenticated
 platform access or restricted scraping is included.
 
-Phase 1 and 2 are complete. Phase 2.5 registry and source expansion are implemented. Phase 3 will add
+Phase 1 and 2 are complete. Phase 2.5 registry and source expansion are implemented. Phase 3 adds
 verified resume matching and truthful cover letters; Phase 4 the authenticated local
 dashboard and email; Phase 5 launchd searches three times per weekday and once per
 weekend day; Phase 6 optional permitted Playwright assistance. These later phases

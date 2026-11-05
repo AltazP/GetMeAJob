@@ -1,11 +1,11 @@
 # Product roadmap
 
 Phases 1, 2 and 2.5 are completed and tested. Phase 2.5 is released at v0.2.5 (078dca6).
-Phase 3 is authorized next; Phase 3.5 and later are planning only.
+Phase 3 is implemented and tested locally, pending push/release approval. Phase 3.5 and later are planning only.
 
-Remaining phases:
+Phase 3 completed scope and remaining phases:
 
-PHASE 3:
+PHASE 3 (implemented locally; see phase-3.md for limits):
 - Secure local PDF/DOCX resume upload page
 - Editable and verified user profile
 - Multiple resume versions

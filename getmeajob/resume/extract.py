@@ -46,17 +46,9 @@ def extract(filename,data):
 
 
 def candidates(text):
-    aliases={'education':'education','university':'university','coursework':'coursework','relevant coursework':'coursework',
-        'experience':'employment','employment history':'employment','skills':'skills','technical skills':'tools',
-        'tools':'tools','projects':'projects','certifications':'certifications','achievements':'achievements','program':'program'}
-    category='education'; results=[]
-    for line in text.splitlines():
-        line=line.strip().strip('•').strip()
-        if line.casefold().rstrip(':') in aliases:
-            category=aliases[line.casefold().rstrip(':')]; continue
-        if line: results.append((category,line[:2000]))
-        if len(results)>=150: break
-    return results
+    # Compatibility with callers storing simple pairs; new uploads retain rich evidence.
+    from getmeajob.resume.parser import parse
+    return [(item['category'],item['value']) for item in parse(text)]
 
 
 def worker(suffix,data):

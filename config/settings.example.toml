@@ -1,5 +1,6 @@
 # Copy to config/settings.toml for local use. Never add credentials here.
-# Phase 1 validates these future dashboard settings; it starts no server.
+# Dashboard-only example retained from Phase 1; it starts no server.
+# For Phase 2 live discovery, copy search.example.toml instead.
 [dashboard]
 host = "127.0.0.1"
 port = 8000

@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from email.message import Message
+from http.client import IncompleteRead
 import io
 import json
 from pathlib import Path
@@ -393,6 +394,18 @@ class HttpTests(unittest.TestCase):
             create.return_value.reset_mock()
             tls_context()
             create.return_value.load_verify_locations.assert_not_called()
+
+    def test_incomplete_response_is_reported_as_source_failure(self):
+        client = self.client(IncompleteRead(b"partial"), IncompleteRead(b"partial"), IncompleteRead(b"partial"))
+        with self.assertRaises(SourceError):
+            client.get(self.URL)
+        self.assertEqual(len(self.opener.requests), 3)
+
+    def test_json_decoder_exhaustion_is_reported_as_source_failure(self):
+        client = self.client(b"[]")
+        with patch("getmeajob.sources.http.json.loads", side_effect=RecursionError), \
+             self.assertRaisesRegex(SourceError, "JSON"):
+            client.get(self.URL)
 
     def test_no_unapproved_hosts_or_redirects(self):
         client = self.client()

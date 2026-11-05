@@ -35,7 +35,7 @@ Prefer Python, SQLite, FastAPI, Jinja2, Playwright for permitted forms, macOS la
 free job APIs, and free local AI where hardware-compatible. Introduce dependencies
 only when the current phase requires them. Keep application logic independent of
 Codex and any development assistant. Prefer small modules and explicit configuration.
-Use Python 3.11+; Phase 1 uses only standard-library runtime and testing tools.
+Use Python 3.11+; the Phase 1 and 2 runtime and tests use only the standard library.
 
 ## Phases and scope control
 
@@ -91,7 +91,7 @@ application submission. Ask before pushing each completed milestone.
 - Push completed milestones only after user approval. Local commit permission is
   not permission to push. Never rewrite published history without explicit direction.
 
-## Phase 1 verification and handoff
+## Phase 1 verification and handoff (completed historical milestone)
 
 Inspect macOS, processor architecture, installed Python and Git, and report
 compatibility problems. Create the project structure and documentation, privacy
@@ -106,3 +106,24 @@ python3 -m venv .venv
 .venv/bin/python -m getmeajob
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+
+## Phase 2 verification and handoff
+
+Run `.venv/bin/python -m unittest discover -s tests -v` before committing. Keep tests
+offline with synthetic fixtures. Live verification is a separate manual check:
+
+```sh
+.venv/bin/python -m getmeajob search --config config/search.example.toml
+.venv/bin/python -m getmeajob demo
+```
+
+The example location is Waterloo, Ontario with a configurable 100 km straight-line
+radius. Document unknown metadata and unresolved locations rather than guessing.
+Source adapters operate on explicit employer-board lists, never all companies. Keep
+public API requests bounded and paced; honor access denials and rate-limit pauses.
+Store all successful observations under ignored `data/`, preserve discovery/check/
+update timestamps, and retain source provenance when deduplicating. Demonstrations
+must stay distinct from live results and must not pollute the live database. Explain
+manual board/filter configuration, tested behavior, unsupported sources and known
+limitations. Ask for permission before pushing Phase 2 commits to GitHub.

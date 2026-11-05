@@ -1,5 +1,6 @@
 """Bounded, paced HTTPS GETs with no redirects or protection bypasses."""
 
+from http.client import HTTPException
 import json
 from pathlib import Path
 import ssl
@@ -72,7 +73,7 @@ class JsonClient:
                     self.sleep(2 ** (attempt + 1))
                     continue
                 raise SourceError(f"HTTP {exc.code}: board request failed (check token and region).") from exc
-            except (URLError, TimeoutError, OSError) as exc:
+            except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
                 if isinstance(reason, ssl.SSLCertVerificationError):
                     raise SourceError("TLS certificate verification failed. Check your Python/system CA certificates; verification has not been disabled.") from exc
@@ -80,6 +81,6 @@ class JsonClient:
                     self.sleep(2 ** (attempt + 1))
                     continue
                 raise SourceError("Network request failed after three attempts; check connectivity and TLS certificates.") from exc
-            except (ValueError, UnicodeError) as exc:
+            except (ValueError, UnicodeError, RecursionError) as exc:
                 raise SourceError("API returned invalid JSON; no content was executed.") from exc
         raise SourceError("Request failed.")

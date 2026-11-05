@@ -15,7 +15,7 @@ and preview-confirm reprocessing into a new all-pending resume version. Existing
 resumes, verified facts, packages and jobs remain intact. No external application
 actions are implemented.
 
-Latest complete test run: 168 passed, 0 failed (November 5, 2026). The original 148
+Latest complete test run: 172 passed, 0 failed (November 5, 2026). The original 148
 tests are unchanged. Synthetic fixtures only; setup layout and PDF export visually
 checked. One test-only HTTPX deprecation warning remains; no runtime failure.
 
@@ -29,8 +29,14 @@ Published: Phase 2.5 main and annotated v0.2.5 both point to
 078dca6cbea48e0f888d8529cd6d30e9acf91ab6. Existing v0.2.0 unchanged. No Phase 3
 commits have been pushed and v0.3.0 has not been created.
 
-Latest fix: password forms use same-origin referrer policy and explicit actions;
-legitimate browser POSTs work while opaque/foreign origins and bad CSRF are rejected.
+Latest fix: matching jobs now reads one read-only SQLite page of 20 latest distinct
+jobs, then scores only that page. Search/order/count are server-side; stored jobs and
+profiles are unchanged. There is no score cache, so changed verified facts or job
+descriptions are reflected on the next request. Database failures show HTTP 503.
+On the existing 1,342-job/3-resume dataset, read-only load-and-score work fell from
+30.8 seconds to 0.9 seconds. An isolated loopback server with the existing jobs DB
+and a temporary synthetic profile rendered 20 cards over HTTP in 0.076 seconds.
+Password forms retain same-origin referrer policy and explicit actions.
 
 Known limits: heuristic section/position extraction (columns, unusual headings,
 ambiguous employer/title layouts and unmarked bullet boundaries need review) and

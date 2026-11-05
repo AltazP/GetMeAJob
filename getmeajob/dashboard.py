@@ -3,6 +3,7 @@ from dataclasses import asdict
 import hashlib
 import io
 import json
+import sqlite3
 from pathlib import Path
 import secrets
 import time
@@ -15,7 +16,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from getmeajob.resume.store import ProfileStore, CATEGORIES
 from getmeajob.resume.extract import extract, MAX_FILE
 from getmeajob.resume.parser import parse, GROUPS
-from getmeajob.resume.intelligence import jobs, match, letter, weights, DEFAULT_WEIGHTS
+from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, weights, DEFAULT_WEIGHTS
 from getmeajob.resume.documents import export
 from getmeajob.models import utc_now
 
@@ -35,8 +36,8 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
     templates=Environment(loader=FileSystemLoader(Path(__file__).parent/'templates'),autoescape=select_autoescape(['html']))
     origin=f'http://127.0.0.1:{port}'
 
-    def page(request,title,**context):
-        return HTMLResponse(templates.get_template('dashboard.html').render(title=title,csrf=request.state.session['csrf'],categories=CATEGORIES,**context))
+    def page(request,title,status_code=200,**context):
+        return HTMLResponse(templates.get_template('dashboard.html').render(title=title,csrf=request.state.session['csrf'],categories=CATEGORIES,**context),status_code=status_code)
 
     @app.middleware('http')
     async def boundary(request,call_next):
@@ -228,28 +229,26 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         form=await request.form(); configuration=weights({k:float(form[k]) for k in DEFAULT_WEIGHTS})
         store.set_setting('weights',json.dumps(configuration)); return RedirectResponse('/jobs',303)
 
-    def ranked_jobs(query='',offset=0):
-        configuration=json.loads(store.get_setting('weights',json.dumps(DEFAULT_WEIGHTS)))
-        resumes=store.resumes(); results=[]
-        profile_facts={r['id']:store.facts(r['id']) for r in resumes}
-        for identity,job,checked in jobs(job_database):
-            if query and query.casefold() not in (job.role+' '+job.employer).casefold(): continue
-            scores=[(r,match(job,profile_facts[r['id']],configuration)) for r in resumes]
-            if not scores: continue
-            r,m=max(scores,key=lambda item:(item[1]['score'],item[0]['is_default']))
-            results.append({'id':identity,'job':job,'checked':checked,'resume':r,'match':m})
-        return sorted(results,key=lambda item:-item['match']['score'])
-
     @app.get('/jobs')
     async def matching_jobs(request:Request,q:str='',offset:int=0):
-        results=ranked_jobs(q)
-        offset=max(0,offset)
-        return page(request,'Matching stored jobs',screen='jobs',results=results[offset:offset+30],q=q,offset=offset,total=len(results))
+        try:
+            offset=max(0,min(offset,100000)); q=q.strip()
+            rows,total=job_page(job_database,q,offset)
+            configuration=json.loads(store.get_setting('weights',json.dumps(DEFAULT_WEIGHTS)))
+            resumes=store.resumes(); profile_facts={r['id']:store.facts(r['id']) for r in resumes}
+            results=[]
+            for identity,job,checked in rows:
+                scores=[(r,match(job,profile_facts[r['id']],configuration)) for r in resumes]
+                if scores:
+                    r,m=max(scores,key=lambda item:(item[1]['score'],item[0]['is_default']))
+                    results.append({'id':identity,'job':job,'checked':checked,'resume':r,'match':m})
+            return page(request,'Matching stored jobs',screen='jobs',results=results,q=q,offset=offset,total=total)
+        except (sqlite3.DatabaseError, OSError, KeyError, TypeError, json.JSONDecodeError):
+            return page(request,'Stored jobs unavailable',status_code=503,screen='message',
+                message='Could not load stored jobs. The local database may be busy or contain an invalid posting. Please retry; no records were changed.')
 
     def get_job(identity):
-        for key,job,checked in jobs(job_database):
-            if key==identity: return job,checked
-        raise ValueError('Job not found.')
+        return job_by_id(job_database,identity)
 
     @app.post('/packages')
     async def generate(request:Request):

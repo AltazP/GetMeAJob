@@ -40,6 +40,12 @@ The old resume and its verified facts stay available. Review and verify the new 
 then make it your default from the Resumes page if desired. Matching, letter editing
 and TXT/DOCX/PDF/ZIP downloads remain browser-based.
 
+**Matching jobs** opens 20 stored jobs at a time, most recently checked first.
+The page computes relevance for those 20 jobs and does not run a live job search.
+Use Next and Previous to browse; a busy or invalid local database displays an error
+you can retry. Scores refresh when you open a page after verifying facts or updating
+stored job postings.
+
 On a fresh checkout, first install the free project-local dependencies:
 
 ```sh

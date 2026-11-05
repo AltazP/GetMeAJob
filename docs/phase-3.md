@@ -68,8 +68,13 @@ are checked exactly. This is a local HTTP application, not a remotely hosted ser
    not change the original resume, verified facts, packages or default selection.
    Verify the new copy and choose Make default on the Resumes page if wanted.
 5. **Matching jobs:** compare your versions against real stored jobs. Search by
-   employer/role and browse 30 results per page. The best score selects a recommended
-   resume; equal scores prefer the default. Existing stored postings may be stale.
+   employer/role and browse 20 results per page, newest database check first. Only
+   the current page is matched against your resume versions. The best score selects
+   a recommended resume; equal scores prefer the default. Scores are recalculated
+   when that page is opened, so edits to verified facts or stored job descriptions
+   are reflected without a stale score cache. Existing stored postings may be stale.
+   Opening this page never searches the internet. A busy or invalid local job database
+   shows a retryable error page rather than leaving the browser loading indefinitely.
 6. **Prepare draft package:** use verified facts to generate a deterministic cover
    letter and a snapshot of the original job, selected resume, score/evidence,
    uncertainty and missing information. No verified facts means no generated letter.
@@ -172,7 +177,7 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **168 passing tests, zero failures**. Original Phase 1/2/2.5 tests
+The full suite has **172 passing tests, zero failures**. Original Phase 1/2/2.5 tests
 are unchanged. Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
@@ -180,7 +185,8 @@ Host/Origin checks, upload limits, session rotation/restart, login throttling, X
 escaping, browser routes and all four download formats. The correction adds synthetic
 tests for multiline bullets, position grouping, contact classification, Unicode
 cleanup, section/bulk authorization, migration and preservation, and factual letter
-generation. The setup layout and a
+generation. Job-page tests cover a large synthetic database, 20-result pagination,
+newest observation selection, score freshness and a database error page. The setup layout and a
 synthetic PDF export were visually inspected. No real resume or credential was used.
 The installed Starlette test client emits a non-failing HTTPX deprecation warning;
 it does not affect normal dashboard operation.

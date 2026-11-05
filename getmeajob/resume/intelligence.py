@@ -65,6 +65,47 @@ def jobs(path: Path):
     finally: db.close()
 
 
+def job_page(path: Path, query: str = '', offset: int = 0, limit: int = 20):
+    """Read one stable page of the latest observation per job, without changing the job DB."""
+    from getmeajob.models import Job
+    if not path.exists(): return [], 0
+    if not 1 <= limit <= 20 or not 0 <= offset <= 100000 or len(query) > 120:
+        raise ValueError('Invalid job page request.')
+    db=sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)
+    try:
+        db.execute('PRAGMA query_only=ON')
+        # observations_job already indexes job_id. Only the selected page is decoded
+        # and matched; score freshness follows automatically from current facts/jobs.
+        latest='''WITH ranked AS (
+            SELECT job_id,payload,last_checked,
+                ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY last_checked DESC,rowid DESC) AS place
+            FROM observations
+        ) SELECT job_id,payload,last_checked FROM ranked WHERE place=1'''
+        phrase=query.strip()
+        if phrase:
+            filtered=latest+" AND instr(lower(coalesce(json_extract(payload,'$.role'),'') || ' ' || coalesce(json_extract(payload,'$.employer'),'')),lower(?))>0"
+            args=(phrase,)
+        else:
+            filtered=latest; args=()
+        total=db.execute('SELECT COUNT(*) FROM ('+filtered+')',args).fetchone()[0]
+        rows=db.execute('SELECT job_id,payload,last_checked FROM ('+filtered+') ORDER BY last_checked DESC,job_id DESC LIMIT ? OFFSET ?',
+            (*args,limit,offset)).fetchall()
+        return [(identity,Job.from_dict(json.loads(payload)),checked) for identity,payload,checked in rows],total
+    finally: db.close()
+
+
+def job_by_id(path: Path, identity: int):
+    """Fetch the newest observation for one selected job, without scanning all jobs."""
+    from getmeajob.models import Job
+    if not path.exists(): raise ValueError('Job not found.')
+    db=sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)
+    try:
+        row=db.execute('SELECT payload,last_checked FROM observations WHERE job_id=? ORDER BY last_checked DESC,rowid DESC LIMIT 1',(identity,)).fetchone()
+        if not row: raise ValueError('Job not found.')
+        return Job.from_dict(json.loads(row[0])),row[1]
+    finally: db.close()
+
+
 def letter(job,facts,model=None):
     approved=[f for f in facts if f['status']=='verified' and f['category']!='personal']
     if not approved: raise ValueError('Verify at least one fact before generating a letter.')

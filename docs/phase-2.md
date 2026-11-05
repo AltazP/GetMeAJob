@@ -1,5 +1,8 @@
 # Phase 2 discovery: design and verification
 
+Historical record of the tagged v0.2.0 milestone. Current source expansion and registry
+behavior are documented in [Phase 2.5](phase-2-5.md) and [architecture](architecture.md).
+
 Phase 2 extends the Phase 1 package. It requires Python 3.11+ and has no third-party
 runtime or test dependencies. No cover letters, email, scheduling, server, application
 filling or submission are implemented.

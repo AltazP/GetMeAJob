@@ -42,6 +42,7 @@ Use Python 3.11+; the Phase 1 and 2 runtime and tests use only the standard libr
 1. Environment checks, project structure, README, AGENTS.md, .gitignore, Python
    setup, safe example configuration, basic application entry point and initial tests.
 2. Real job discovery, search filters, normalization and deduplication.
+2.5. Employer discovery registry, public source expansion, verification and health.
 3. Resume matching, relevance scoring and cover-letter generation.
 4. Secure local dashboard, email notifications and application approvals.
 5. Automated job search using macOS launchd.
@@ -130,3 +131,34 @@ update timestamps, and retain source provenance when deduplicating. Demonstratio
 must stay distinct from live results and must not pollute the live database. Explain
 manual board/filter configuration, tested behavior, unsupported sources and known
 limitations. Ask for permission before pushing Phase 2 commits to GitHub.
+
+
+## Phase 2.5 development rules
+
+Keep migrations additive, transactional and versioned; never discard existing jobs
+or resume/personal data. Separate employer identity from multiple career sources and
+retain discovery evidence. Detection/import may only create candidates or unsupported
+records. Official endpoint/schema verification is required before registry searches.
+Re-enabling a source/employer requires re-verification. Honor provider disable policies.
+
+Supported posting adapters: Greenhouse, Lever global/EU and Ashby (isListed=true only).
+Official HN public API hiring-thread leads and explicitly permitted/robots-checked
+career pages provide discovery. No restricted-platform scraping or manufactured
+employer names, website URLs or board IDs. General search providers and Workday/custom
+job parsers are not implemented. Keep optional metadata unknown rather than inferred.
+
+Preserve the public-IP pinned TLS transport, fixed API host allowlist, configured
+page hosts, robots checks, byte/time/request caps, persistent pauses and bounded retry
+backoff. Never bypass these controls with redirects, proxies or an alternate scraper.
+Dry-run/offline must not issue requests or mutate the persistent DB. Cache reuse must
+retain actual source timestamps and must not overwrite newer observations.
+
+Run every test before committing. The Phase 1/2 tests must remain unchanged and pass.
+New fixtures must be synthetic/mocked and test migration preservation, CSV handling,
+ATS detection/verification, Ashby normalization, health/staleness, source controls,
+SSRF/redirect/robots protections, request caps, partial errors and offline behavior.
+Report actual coverage separately from estimates. Keep private CSVs, local configs,
+databases/caches/backups and all personal documents ignored. Only the reviewed public
+examples/employers.example.csv is exempt from CSV exclusions. Commit tested milestones
+and ask before pushing. Preserve v0.2.0; do not tag a new release without instruction.
+Do not start Phase 3.

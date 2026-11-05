@@ -3,10 +3,10 @@
 A free, private, local-first job-search and application assistant for macOS.
 It runs directly on your Mac, independently of Codex, with no paid APIs or hosting.
 
-## Current status: Phase 2 job discovery
+## Current status: Phase 2.5 employer discovery and source expansion
 
-Real job discovery works through the public Greenhouse and Lever job-posting APIs.
-Searches use a configurable list of employer boards, apply your filters, store
+Real job discovery works through the public Greenhouse, Lever and Ashby job-posting APIs.
+Searches use configured boards or the growing verified employer registry, apply your filters, store
 postings in SQLite and display unique matching jobs in Terminal. These APIs do
 **not** search every employer on their platforms. The included employers are working
 API examples, not a personalized list of recommended employers.
@@ -15,6 +15,33 @@ An offline demo uses clearly fictional employers and an in-memory database.
 Resume matching, cover letters, email, dashboard, scheduling, autofill and submission
 remain future phases. Running the application with no subcommand prints a readiness
 message; it does not start a server.
+
+## Discover employers automatically
+
+The new registry records employer identity, source evidence, health and verification.
+The public Hacker News hiring feed finds employer leads without entering every board
+manually. CSV imports and permitted career-page link extraction can add more leads.
+Discovery creates candidates; a separate official-endpoint check must verify them.
+
+```sh
+cd ~/Projects/GetMeAJob
+.venv/bin/python -m getmeajob employers discover --config config/registry.example.toml
+.venv/bin/python -m getmeajob employers verify --config config/registry.example.toml
+.venv/bin/python -m getmeajob search --all-enabled --config config/registry.example.toml
+.venv/bin/python -m getmeajob employers coverage --config config/registry.example.toml
+```
+
+The example seeds three public boards and enables bounded automatic feed discovery.
+No keys, account or new installation is needed. Repeat discovery to inspect the next
+batch. All new boards stay candidates until verified. Workday/custom pages are retained
+as unsupported records. HTML extraction needs explicitly permitted page hosts and
+robots access. Supported ATS providers are **Greenhouse, Lever (global/EU), and Ashby**.
+
+Read [the Phase 2.5 guide](docs/phase-2-5.md) for CSV imports, source/provider controls,
+offline/dry-run commands, settings, exact verification rules and limitations, and
+[the architecture](docs/architecture.md) for the additive migration design. Existing
+jobs are preserved. Fresh snapshots avoid immediate duplicate board downloads.
+No Phase 3 work has begun.
 
 ## Run it
 
@@ -84,7 +111,7 @@ region = "global"
 
 Find a token in the employer's public career link: `boards.greenhouse.io/TOKEN`,
 `job-boards.greenhouse.io/TOKEN`, or `jobs.lever.co/TOKEN`. Enter only `TOKEN`, not a
-full URL. For `jobs.eu.lever.co/TOKEN`, set Lever's `region = "eu"`. Use the same
+full URL. Ashby uses `jobs.ashbyhq.com/TOKEN` and `source = "ashby"`. For `jobs.eu.lever.co/TOKEN`, set Lever's `region = "eu"`. Use the same
 employer name on different boards for consistent content-based deduplication.
 Optionally add `industry = "Your verified classification"` to a board; industry
 comes from your explicit classification, not a guessed department or company name.
@@ -176,8 +203,8 @@ JSON `null`; [the discovery notes](docs/phase-2.md) explain source-specific cove
 Requests are HTTPS GETs to supported public API hosts only, paced at least one second
 apart per host. Timeouts, response size and pagination are bounded. Transient failures
 get at most three attempts. Access denial, rate limits, or a server `Retry-After`
-pause stop that host for the current search; follow the reported delay before a new
-run. There is no login, CAPTCHA handling, redirect following or bypass behavior.
+pause stop that host and persist its deadline across commands; follow the reported
+delay before a new run. There is no login, CAPTCHA handling, redirect following or bypass behavior.
 A failing board reports a warning while successful boards still return results.
 
 Exit codes: `0` = successful search (including zero matches); `1` = source/storage
@@ -199,7 +226,7 @@ errors; verification is never disabled.
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 77 offline automated tests cover configuration, normalization, filtering,
+The 131 offline automated tests cover configuration, normalization, filtering,
 locations, SQLite persistence and timestamps, deduplication, source isolation,
 pagination, HTTP failures and rate limits, TLS verification, terminal safety and CLI
 behavior. Tests use synthetic data and no accounts or network access.
@@ -217,12 +244,13 @@ sessions and common personal document formats; always review staged files.
 
 ## Remaining phases and unsupported sources
 
-Only Greenhouse and Lever public employer-board APIs are supported, including Lever
-EU endpoint support (tested offline; the live check used the global endpoint).
-LinkedIn, Indeed, Workday, Ashby and other sources are not implemented. No universal
-company discovery, authenticated job platforms or restricted scraping is included.
+Greenhouse, Lever and Ashby public employer-board APIs are supported; Lever EU routing
+is tested offline. The live checks used global endpoints. The official HN API supplies
+employer leads. LinkedIn, Indeed, Workday and arbitrary custom job-page parsing remain
+unsupported. Discovery is bounded and cannot find every employer; no authenticated
+platform access or restricted scraping is included.
 
-Phase 1 foundation is complete. Phase 2 discovery is implemented. Phase 3 will add
+Phase 1 and 2 are complete. Phase 2.5 registry and source expansion are implemented. Phase 3 will add
 verified resume matching and truthful cover letters; Phase 4 the authenticated local
 dashboard and email; Phase 5 launchd searches three times per weekday and once per
 weekend day; Phase 6 optional permitted Playwright assistance. These later phases

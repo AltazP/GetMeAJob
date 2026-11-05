@@ -234,6 +234,51 @@ The web interface can create, pause and delete presets but has no route that sen
 Scheduling (launchd) is not implemented yet, so a digest goes out when you run the
 refresh command with `--notify`. Presets need a resume version with verified facts.
 
+## Automatic refresh (launchd)
+
+```sh
+.venv/bin/python -m getmeajob schedule install      # 3 runs per weekday, 1 per weekend day
+.venv/bin/python -m getmeajob schedule status
+.venv/bin/python -m getmeajob schedule uninstall
+.venv/bin/python -m getmeajob schedule run          # one refresh now (this is what launchd runs)
+```
+
+Default times: weekdays 08:00, 12:30, 17:00; weekends 09:00 (`--weekday-times 07:30,13:00`
+and `--weekend-time 10:00` change them). `install` writes a user-level LaunchAgent
+(`~/Library/LaunchAgents/com.getmeajob.refresh.plist`, no admin rights, nothing
+system-wide) that runs the project's own Python with `config/live-discovery.toml`
+(`--config` to choose another). Each run re-verifies stale sources, refreshes jobs
+(repeating up to 6 passes because each pass is capped per host), then sends your preset
+digests. A lock file stops overlapping runs; failures never lose or repeat postings.
+launchd runs a run missed during sleep when the Mac wakes; a powered-off Mac misses it.
+The log is `data/logs/refresh.log`. The first scheduled email may ask macOS for Keychain
+access: choose Always Allow (run `notify test` once first to grant it).
+
+## Apply assistant
+
+On a package you have set to **reviewed**, **Open the application and fill it** starts
+Chrome (your installed Google Chrome, driven by Playwright; no browser download) on the
+posting's application page and fills the plain fields from **Applicant details** (first/last name, email,
+phone, city, LinkedIn, website) plus your resume file and the package cover letter
+(file upload or text box, whichever the form has). Then it stops. **It never submits.** A
+banner explains this, and you read everything, answer the rest and press Submit
+yourself. "I submitted this application myself" only records it for your own tracking.
+
+Safety rules: only https pages on `boards.greenhouse.io`, `job-boards.greenhouse.io`,
+`jobs.lever.co`, `jobs.eu.lever.co` and `jobs.ashbyhq.com` are opened (no redirects to
+other hosts are followed by the assistant itself; the page may navigate normally). Custom
+dropdowns, selects, checkboxes, demographic, salary, work-authorization,
+company/school and free-text questions are never filled; required ones left empty are
+listed on the package page. The only click it makes is a plain "Apply" link to reveal
+a form. No CAPTCHA, login, LinkedIn or Easy Apply handling. Job pages are untrusted
+text; nothing on them can change the steps. The assistant runs in its own process
+started by an authenticated, CSRF-protected request with a fixed argument list.
+
+Setup: `.venv/bin/pip install -r requirements-phase6.txt` (project-local), then save
+**Applicant details** in the browser. Limitation: verified only on synthetic forms and mocks;
+real career sites change, so expect some fields to be left for you. Forms with
+custom widgets (Workday etc.) are unsupported by design.
+
 ## Employer coverage
 
 `examples/employers.starter.csv` is a reviewed public list of about 150 candidate
@@ -254,6 +299,21 @@ and are listed by `coverage`. Verification is not an endorsement of any employer
 Large banks, consultancies and many retailers use Workday or custom sites, which are
 not supported, so they will not appear. Same-title postings at one employer are kept
 separate when their URLs differ (they are often distinct requisitions).
+
+## Application links and cover letters (latest)
+
+Every job card now has **Open the posting / apply on the company site** (http/https links only)
+and a label: **Auto-fill available** or **Apply on the site yourself**. Many companies show
+Greenhouse jobs on their own site; for those the assistant opens Greenhouse's official embed
+form (`job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>`, built from the job's
+own board name and numeric ID). Forms may include a reCAPTCHA that you solve yourself.
+
+Cover letters are still built only from your verified, non-personal facts, with fixed wording
+around them: an opening naming the role and employer plus the skills the posting names that your
+facts contain; your most relevant experience as sentences ("In my role as ... at ..., I built ...");
+relevant projects; education; a closing; and a sign-off with your name from Applicant details
+(`[Your name]` appears if none is saved). Skills the posting wants but your facts lack are never
+claimed. Review and edit every letter.
 
 ## Truthful letters and optional local AI
 
@@ -321,8 +381,7 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **239 passing tests, zero failures** (172 earlier tests are unchanged;
-67 cover filters, email presets, classification, scoring, caches and the new page behavior). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
+The full suite has **273 passing tests, zero failures** (172 earlier tests are unchanged; 101 new ones cover filters, scoring, caches, email presets, the schedule and the apply assistant). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
 Host/Origin checks, upload limits, session rotation/restart, login throttling, XSS

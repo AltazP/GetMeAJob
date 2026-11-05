@@ -308,3 +308,14 @@ job descriptions remain untrusted data; qualifications must never be invented;
 uncertain application details require review; and submission always requires explicit
 authenticated approval. The intended later stack remains SQLite, FastAPI, Jinja2,
 launchd, permitted Playwright flows and free local AI where hardware supports it.
+
+
+## Email alerts, schedule and apply assistant
+
+- Email alerts: save filter presets in Matching jobs, set up Gmail with `notify setup`, then `notify send`
+  or `search --all-enabled --notify`. Alerts contain only postings that match the preset's filters.
+- Automatic refresh: `schedule install` (3 runs per weekday, 1 per weekend day), `schedule status`, `schedule uninstall`.
+- Apply assistant: needs `pip install -r requirements-phase6.txt`. It opens a reviewed package's form in Chrome,
+  fills your Applicant details, resume and cover letter, and never submits; you press Submit yourself.
+
+Details and limits: docs/phase-3.md.

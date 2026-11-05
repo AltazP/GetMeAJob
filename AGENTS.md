@@ -190,3 +190,13 @@ final confirmation. Legacy resume reprocessing creates a new all-pending version
 after preview and confirmation, preserving old versions, verified facts and packages.
 Matching and generated letters use verified qualification facts only. Never treat
 personal contact details as qualification evidence. Keep tests synthetic and offline.
+
+
+## Later additions (user-directed)
+
+Email presets (Gmail via Keychain), the launchd refresh schedule and the apply assistant
+are implemented; see docs/phase-3.md. Rules that still hold: the assistant fills but
+never submits (the user presses Submit), only on reviewed packages and supported hosts;
+no CAPTCHA/login bypass, no LinkedIn automation, no outreach; digests contain postings and
+scores only; secrets live in macOS Keychain; do not run the assistant against live
+employer forms during development.

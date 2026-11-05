@@ -39,7 +39,7 @@ def match(job,facts,configuration=None):
             if hits: selected.append(fact['value']); overlap.update(hits)
         relevant[category]=selected
         components[category]=min(1,len(overlap)/4)
-    score=round(100*sum(components[k]*configuration[k] for k in configuration)/sum(configuration))
+    score=round(100*sum(components[k]*configuration[k] for k in configuration)/sum(configuration.values()))
     unknown=['Work authorization, eligibility and unparsed requirements require review.',
              'Skill mentions are not necessarily mandatory requirements.']
     if not wanted: unknown.append('No catalogued skill requirements identified; skills component is zero, not a confirmed mismatch.')

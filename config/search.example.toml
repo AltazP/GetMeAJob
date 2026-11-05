@@ -1,0 +1,63 @@
+# LIVE search: only these employer boards are searched, not all Greenhouse/Lever users.
+# Copy this file to config/settings.toml. No credentials or accounts are needed.
+[dashboard]
+host = "127.0.0.1"
+port = 8000
+
+[storage]
+# Relative to the directory from which you run the command; keep under ignored data/.
+database = "data/jobs.sqlite3"
+
+[network]
+request_interval_seconds = 1.0 # Minimum 1; increase if the source requires it.
+
+[search]
+city = "Waterloo, Ontario"
+latitude = 43.4643
+longitude = -80.5204
+radius_km = 100
+use_radius = true
+# Remote jobs must still resolve within the radius unless you explicitly enable this.
+# Enabling this does NOT verify eligibility to work remotely from your home location.
+include_remote_outside_radius = false
+# Active metadata filters reject unknowns by default. true includes and flags them.
+include_unknown = false
+# Empty arrays disable a filter. Titles are OR; keywords are ALL; text is case-insensitive.
+titles = []
+keywords = []
+excluded_keywords = []
+companies = []          # Exact employer names, case-insensitive.
+excluded_companies = [] # Exclusions always win.
+industries = []         # Exact user-supplied [[boards]].industry classifications.
+work_arrangements = [] # remote, hybrid, on-site
+employment_types = []  # internship, co-op, full-time, part-time, contract
+experience_levels = [] # entry-level, mid-level, senior, executive
+# Uncomment optional limits; missing metadata is NOT fabricated.
+# max_experience_years = 2
+# minimum_salary = 50000
+salary_currency = "CAD"
+salary_interval = "year" # year, month, week, hour; no currency/period conversions.
+# posted_within_days = 14
+
+# Public board examples, not employer recommendations. Availability can change.
+# Get tokens from boards.greenhouse.io/TOKEN or job-boards.greenhouse.io/TOKEN.
+[[boards]]
+source = "greenhouse"
+token = "stripe"
+employer = "Stripe"
+# industry = "Financial technology" # Optional YOUR classification, not API metadata.
+
+# Get the token from jobs.lever.co/TOKEN. For jobs.eu.lever.co use region = "eu".
+[[boards]]
+source = "lever"
+token = "palantir"
+employer = "Palantir Technologies"
+region = "global"
+
+# Add exact, verified place aliases when an API uses a location not in the offline map.
+# Bare city names are not resolved by default because they can be ambiguous.
+# [[locations]]
+# name = "Toronto, Ontario (employer label)"
+# latitude = 43.6532
+# longitude = -79.3832
+# aliases = ["Toronto"]

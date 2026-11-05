@@ -48,7 +48,7 @@ class ConfigurationTests(unittest.TestCase):
                 Settings(port=port)
 
     def test_unknown_settings_are_rejected(self):
-        for content in ('[search]\ncity="Example"', '[dashboard]\nprot=8000', 'dashboard="bad"'):
+        for content in ('[unsupported]\ncity="Example"', '[dashboard]\nprot=8000', 'dashboard="bad"'):
             with self.subTest(content=content), self.assertRaises(ConfigurationError):
                 self.load_toml(content)
 
@@ -63,11 +63,11 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def test_main_reports_phase_one(self):
+    def test_main_reports_current_phase(self):
         output = io.StringIO()
         with redirect_stdout(output):
             self.assertEqual(main([]), 0)
-        self.assertIn("Phase 1 foundation ready", output.getvalue())
+        self.assertIn("Phase 2 job discovery ready", output.getvalue())
         self.assertIn("not running", output.getvalue())
 
     def test_config_error_returns_nonzero(self):

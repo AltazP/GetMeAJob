@@ -47,9 +47,13 @@ Use Python 3.11+; Phase 1 uses only standard-library runtime and testing tools.
 5. Automated job search using macOS launchd.
 6. Optional Playwright autofill and submission assistance.
 
-Current authorized scope: **Phase 1 ONLY**. Do not begin Phase 2 or later without
-further user instruction. Configuration for the future dashboard is validation only:
-Phase 1 must not start a server or claim later functionality exists.
+Current authorized scope: **Phase 2 — Job Discovery** (Phase 1 reviewed and approved).
+Extend the existing foundation with Greenhouse and Lever employer-board adapters,
+configurable filters, honest normalization, SQLite persistence and deduplication,
+a real search command and a separate synthetic offline demo. Test discovery,
+filtering, location handling, source failures and persistence. Do not begin Phase 3
+or later: no cover letters, email, scheduling, dashboard server, autofill or
+application submission. Ask before pushing each completed milestone.
 
 ## Security and privacy rules
 

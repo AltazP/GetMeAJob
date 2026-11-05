@@ -208,6 +208,32 @@ unbounded approach took 30 s for 1,342 jobs. A test with 1,200 synthetic jobs fa
 if the page exceeds a few seconds. Known limit: every request still reads all stored
 postings (about 1 s at 15,000), so very large databases (50,000+) will feel slower.
 
+## Email alerts (presets)
+
+On Matching jobs, set filters and use **Save as email preset** (up to 10). Presets are
+stored in `private/profiles.sqlite3` (schema 4: `notify_presets`, `notify_sent`). After a
+refresh, `notify send` (or `search ... --notify`) builds, for every enabled preset, the
+postings that match it and have not been emailed for that preset, ranked by match, and
+sends one digest per preset (at most 30 postings; the rest roll over). A posting is
+emailed once per preset; dismissed ("Not interested") postings are skipped. A failed send
+marks nothing as sent, so the postings are retried next time.
+
+```sh
+.venv/bin/python -m getmeajob notify setup --address YOU@gmail.com   # once; app password goes to Keychain
+.venv/bin/python -m getmeajob notify test
+.venv/bin/python -m getmeajob notify preview     # writes private/digests/*.html, sends nothing
+.venv/bin/python -m getmeajob notify send
+.venv/bin/python -m getmeajob search --all-enabled --max-requests 0 --notify --config config/live-discovery.toml
+```
+
+Rules: Gmail only (SMTP over TLS to smtp.gmail.com), from your address to the same
+address. The app password is read from macOS Keychain at send time and is never written
+to a file, setting or log. Emails contain postings, scores, a reason line and links, never
+resume text or personal facts; job text is HTML-escaped and only http(s) links are used.
+The web interface can create, pause and delete presets but has no route that sends mail.
+Scheduling (launchd) is not implemented yet, so a digest goes out when you run the
+refresh command with `--notify`. Presets need a resume version with verified facts.
+
 ## Employer coverage
 
 `examples/employers.starter.csv` is a reviewed public list of about 150 candidate
@@ -295,8 +321,8 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **224 passing tests, zero failures** (172 earlier tests are unchanged;
-52 cover filters, classification, scoring, caches and the new page behavior). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
+The full suite has **239 passing tests, zero failures** (172 earlier tests are unchanged;
+67 cover filters, email presets, classification, scoring, caches and the new page behavior). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
 Host/Origin checks, upload limits, session rotation/restart, login throttling, XSS

@@ -80,8 +80,11 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--dry-run", action="store_true", help="Preview sources without network or writes")
             command.add_argument("--force", action="store_true", help="Bypass board cache freshness, never rate limits")
             command.add_argument("--max-requests", type=int, help="Global request cap; 0 disables this cap")
+            command.add_argument("--notify", action="store_true", help="After a successful search, email new matches for your saved presets")
     commands.add_parser("serve", help="Start the authenticated local resume interface")
     employer_cli.configure(commands)
+    from getmeajob import notify_cli
+    notify_cli.configure(commands)
     args = parser.parse_args(argv)
     try:
         settings = load_settings(args.config)
@@ -96,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
             settings = replace(settings, discovery=replace(settings.discovery, max_requests=max_requests or None))
         if args.command == "employers":
             return employer_cli.run(args, settings)
+        if args.command == "notify":
+            return notify_cli.run(args, settings)
         if args.command is None:
             print(f"GetMeAJob {__version__} — Phase 2 job discovery ready; Phase 2.5 employer registry and Phase 3 resume interface available.")
             print(f"Local dashboard address: http://{settings.host}:{settings.port} (not running).")
@@ -136,7 +141,9 @@ def main(argv: list[str] | None = None) -> int:
                     raise ConfigurationError("No enabled, freshly verified sources. Run employers discover, then employers verify.")
                 report = search_enabled(registry, settings, client_for(settings, registry), force=args.force)
                 display(report, args.limit, args.json)
-                return 1 if report.errors else 0
+            if args.notify:
+                notify_cli.after_search(settings)
+            return 1 if report.errors else 0
         if not settings.boards:
             raise ConfigurationError("No employer boards configured. Copy config/search.example.toml to config/settings.toml and edit [[boards]].")
         with JobStore(settings.database) as store:
@@ -151,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
                             adapters=adapters_for(client, settings.discovery.include_compensation))
             report = replace(report, requests=client.requests)
             display(report, args.limit, args.json)
-            return 1 if report.errors else 0
+        if args.notify:
+            notify_cli.after_search(settings)
+        return 1 if report.errors else 0
     except (ConfigurationError, SourceError, UnicodeError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2

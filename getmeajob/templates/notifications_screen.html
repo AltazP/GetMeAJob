@@ -1,0 +1,14 @@
+<section><h2>Email alerts</h2>
+<p>A preset is a saved set of job filters. After each job refresh, run with <code>--notify</code> and the app emails you one digest per preset: only postings that are new for that preset, best match first, each with its match %, a short reason and a link. A posting is emailed once per preset. Emails contain no resume text or personal facts, and go only from your Gmail to your own Gmail.</p>
+{% if email_address %}<p>Email is set up for <b>{{ email_address }}</b>. Test it in Terminal: <code>.venv/bin/python -m getmeajob notify test</code></p>
+{% else %}<p class="warning">Email is not set up yet. In Terminal run <code>.venv/bin/python -m getmeajob notify setup --address YOU@gmail.com</code>. It asks for a Gmail App Password and stores it in macOS Keychain. Until then you can still make presets and preview digests with <code>notify preview</code>.</p>{% endif %}
+<p>Refresh and email in one go: <code>.venv/bin/python -m getmeajob search --all-enabled --max-requests 0 --notify --config config/live-discovery.toml</code></p>
+{% if error %}<p class="warning" role="alert">{{ error }}</p>{% endif %}
+{% for preset in presets %}<article><h3>{{ preset.name }} {% if not preset.enabled %}<span class="status rejected">paused</span>{% endif %}</h3>
+<p>{% for chip in preset.chips %}<span class="status verified">{{ chip }}</span> {% endfor %}</p>
+<p><small>{{ preset.sent }} posting(s) emailed so far · last run {{ preset.last_run or 'never' }}</small></p>
+<form method="post" action="/notifications/toggle" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="preset_id" value="{{ preset.id }}"><input type="hidden" name="enabled" value="{{ 0 if preset.enabled else 1 }}"><button>{{ 'Pause' if preset.enabled else 'Resume' }}</button></form>
+<form method="post" action="/notifications/delete" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="preset_id" value="{{ preset.id }}"><button>Delete preset</button></form>
+<small>Deleting a preset removes only the preset and its sent log, not jobs, resumes or packages.</small></article>
+{% else %}<p>No presets yet. Open <a href="/jobs">Matching jobs</a>, set filters (for example a field, a minimum match of 60 and Canada only), then use <b>Save as email preset</b>.</p>{% endfor %}
+</section>

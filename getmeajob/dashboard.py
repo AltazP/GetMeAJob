@@ -17,7 +17,7 @@ from getmeajob.resume.store import ProfileStore, CATEGORIES
 from getmeajob.resume.extract import extract, MAX_FILE
 from getmeajob.resume.parser import parse, GROUPS
 from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, weights, stored_weights, DEFAULT_WEIGHTS
-from getmeajob import jobfilters, jobsquery
+from getmeajob import jobfilters, jobsquery, notify
 from getmeajob.classify import FIELDS, LEVELS
 from getmeajob.locations import PROVINCES
 from datetime import datetime, timezone
@@ -258,6 +258,7 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
             return page(request,'Matching stored jobs',status_code=status_code,screen='jobs',results=items,f=filters,error=error,
                 chips=jobfilters.chips(filters),notices=result.notices,total=result.total,offset=offset,stats=result,stale_days=age,
                 sort_queries={k:jobfilters.query_string(replace(filters,sort=k),0) for k in jobfilters.SORTS},
+                preset_json=jobfilters.dump_preferences(filters),
                 view_dismissed=view_dismissed,resumes_exist=bool(store.resumes()),
                 prev_query=jobfilters.query_string(filters,max(0,offset-20)),next_query=jobfilters.query_string(filters,offset+20),
                 options={'fields':FIELDS,'employment':jobfilters.EMPLOYMENT,'arrangements':jobfilters.ARRANGEMENTS,'levels':LEVELS,
@@ -303,6 +304,39 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
     async def reset_filters(request:Request):
         store.delete_setting('job_filters')
         return RedirectResponse('/jobs',303)
+
+    def notifications_page(request,error=None,status_code=200):
+        presets=[{**p,'chips':jobfilters.chips(jobfilters.load_preferences(p['filters']))} for p in store.presets()]
+        return page(request,'Email alerts',status_code=status_code,screen='notifications',presets=presets,error=error,
+            email_address=store.get_setting('notify_address'))
+
+    @app.get('/notifications')
+    async def notifications(request:Request): return notifications_page(request)
+
+    @app.post('/notifications/create')
+    async def create_preset(request:Request):
+        form=await request.form()
+        try:
+            saved=json.loads(str(form.get('filters','')))
+            if not isinstance(saved,dict) or saved.get('version')!=jobfilters.PREFERENCES_VERSION or not isinstance(saved.get('filters'),dict):
+                raise jobfilters.FilterError('The filters could not be read. Apply your filters and try again.')
+            filters=jobfilters.parse(saved['filters']); jobfilters.validate_location(filters)
+            store.add_preset(str(form.get('name','')),jobfilters.dump_preferences(filters))
+        except json.JSONDecodeError:
+            return notifications_page(request,'The filters could not be read. Apply your filters and try again.',400)
+        except (jobfilters.FilterError,ValueError) as exc:
+            return notifications_page(request,str(exc) if str(exc) else 'Invalid preset.',400)
+        return RedirectResponse('/notifications',303)
+
+    @app.post('/notifications/toggle')
+    async def toggle_preset(request:Request):
+        form=await request.form(); store.set_preset_enabled(int(form['preset_id']),form.get('enabled')=='1')
+        return RedirectResponse('/notifications',303)
+
+    @app.post('/notifications/delete')
+    async def delete_preset(request:Request):
+        form=await request.form(); store.delete_preset(int(form['preset_id']))
+        return RedirectResponse('/notifications',303)
 
     @app.post('/jobs/dismiss')
     async def dismiss(request:Request):

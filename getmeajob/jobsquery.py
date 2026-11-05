@@ -96,7 +96,8 @@ def _neg(text):
 
 
 def run(job_db: Path, store, filters: JobFilters, weights: dict, scorer, offset: int = 0, now=None,
-        baseline: str | None = None, view_dismissed: bool = False) -> Result:
+        baseline: str | None = None, view_dismissed: bool = False,
+        limit: int = PAGE, exclude=frozenset()) -> Result:
     now = now or datetime.now(timezone.utc)
     if not job_db.exists():
         return Result([], 0)
@@ -111,7 +112,7 @@ def run(job_db: Path, store, filters: JobFilters, weights: dict, scorer, offset:
         stored += 1
         employers.add(job.employer.casefold()); sources[job.source] = sources.get(job.source, 0) + 1
         newest = max(newest, checked) if newest else checked
-        if (identity in hidden) != view_dismissed:
+        if (identity in hidden) != view_dismissed or identity in exclude:
             continue
         if query and query not in f"{job.role} {job.employer}".casefold():
             continue
@@ -203,7 +204,7 @@ def run(job_db: Path, store, filters: JobFilters, weights: dict, scorer, offset:
             rows = [row for row in rows if row.score is not None and row.score >= filters.minimum_score]
     rows.sort(key=lambda row: sort_key(filters.sort, row))
     result.total = len(rows)
-    page = rows[offset:offset + PAGE]
+    page = rows[offset:offset + limit]
     result.rows = page
     for row in page:
         if not row.field_reason:

@@ -15,7 +15,7 @@ class ProfileStore:
         self.path = directory / 'profiles.sqlite3'
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 3:
+            if version > 4:
                 raise ValueError('Private database is newer than this application.')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -54,6 +54,17 @@ class ProfileStore:
                         PRAGMA user_version=3; COMMIT;""")
                 except Exception:
                     db.rollback(); raise
+            if version < 4:
+                # Email-alert presets and a log of which postings each preset already emailed.
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS notify_presets(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,filters TEXT NOT NULL,
+                            enabled INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL,last_run TEXT);
+                        CREATE TABLE IF NOT EXISTS notify_sent(preset_id INTEGER NOT NULL REFERENCES notify_presets(id) ON DELETE CASCADE,
+                            job_id INTEGER NOT NULL,sent TEXT NOT NULL,PRIMARY KEY(preset_id,job_id));
+                        PRAGMA user_version=4; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
         os.chmod(self.path, 0o600)
 
     def connect(self):
@@ -70,6 +81,35 @@ class ProfileStore:
     def set_setting(self,key,value):
         with self.connect() as db:
             db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+
+    MAX_PRESETS=10
+
+    def presets(self):
+        with self.connect() as db:
+            return [dict(r)|{'sent':db.execute('SELECT COUNT(*) FROM notify_sent WHERE preset_id=?',(r['id'],)).fetchone()[0]}
+                    for r in db.execute('SELECT id,name,filters,enabled,created,last_run FROM notify_presets ORDER BY id')]
+
+    def add_preset(self,name,filters_json):
+        name=' '.join(name.split())
+        if not 1<=len(name)<=60: raise ValueError('Use a preset name of 1-60 characters.')
+        with self.connect() as db:
+            if db.execute('SELECT COUNT(*) FROM notify_presets').fetchone()[0]>=self.MAX_PRESETS: raise ValueError(f'At most {self.MAX_PRESETS} presets.')
+            try: return db.execute('INSERT INTO notify_presets(name,filters,created) VALUES(?,?,?)',(name,filters_json,utc_now())).lastrowid
+            except sqlite3.IntegrityError: raise ValueError('A preset with that name already exists.') from None
+
+    def delete_preset(self,identity):
+        with self.connect() as db: db.execute('DELETE FROM notify_presets WHERE id=?',(identity,))
+
+    def set_preset_enabled(self,identity,enabled):
+        with self.connect() as db: db.execute('UPDATE notify_presets SET enabled=? WHERE id=?',(int(enabled),identity))
+
+    def sent_ids(self,preset_id):
+        with self.connect() as db: return {r[0] for r in db.execute('SELECT job_id FROM notify_sent WHERE preset_id=?',(preset_id,))}
+
+    def mark_sent(self,preset_id,job_ids):
+        with self.connect() as db:
+            db.executemany('INSERT OR IGNORE INTO notify_sent VALUES(?,?,?)',[(preset_id,j,utc_now()) for j in job_ids])
+            db.execute('UPDATE notify_presets SET last_run=? WHERE id=?',(utc_now(),preset_id))
 
     def dismissed(self):
         with self.connect() as db:

@@ -45,6 +45,7 @@
 <label class="inline"><input type="radio" name="unknown" value="0" {% if not f.include_unknown %}checked{% endif %}> Hide them</label></fieldset>
 <button>Apply filters</button> <button formaction="/jobs/filters/save">Save preferences</button>
 </form>
+<form method="post" action="/notifications/create"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="filters" value="{{ preset_json }}"><label>Email me new matches for the filters currently applied <input name="name" maxlength="60" required placeholder="Preset name, e.g. Software internships"></label><button>Save as email preset</button> <small>Sends nothing now. See Email alerts.</small></form>
 <form method="post" action="/jobs/filters/reset"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Reset filters</button> <small>Clears the saved preferences too. Resumes, facts, packages and jobs are not touched.</small></form>
 </details></section>
 <p><strong>Sort by:</strong> {% for key,label in options.sorts.items() %}{% if key==f.sort %}<b>{{ label }}</b>{% else %}<a href="/jobs?{{ sort_queries[key] }}">{{ label }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>

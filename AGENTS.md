@@ -48,16 +48,16 @@ Use Python 3.11+; the Phase 1 and 2 runtime and tests use only the standard libr
 5. Automated job search using macOS launchd.
 6. Optional Playwright autofill and submission assistance.
 
-Current authorized scope: **Phase 2.5 — Employer Discovery and Source Expansion**.
-Preserve the tested/tagged Phase 2 implementation and existing job records. Add safe,
-versioned SQLite migrations, an employer/source registry, CSV import, evidence-based
-ATS detection, separate official-endpoint verification, Ashby public listed postings,
-permitted automatic discovery, health/coverage reporting, bounded networking and
-source controls. New candidates must never activate from URL patterns alone. Treat
-unsupported Workday/custom sources as records, not permission to scrape. Use offline
-fixtures for tests, run every existing test, commit tested milestones and ask before
-pushing. Do not start Phase 3 or implement resume matching, cover letters, email,
-scheduling, dashboard, autofill or submission.
+Current authorized scope: **Phase 3 — Local resume intelligence**.
+Phase 2.5 is released at v0.2.5 (078dca6). Read PROJECT_STATE.md and
+ docs/PRODUCT_ROADMAP.md before changes. Implement PDF/DOCX upload, editable verified
+profiles, multiple resumes/default, explainable configurable matching, deterministic
+truthful cover letters with optional local AI, versioned editable/downloadable packages
+and an authenticated FastAPI/Jinja2 interface bound to 127.0.0.1. Do not start Phase
+3.5 or later. Never submit or send outreach. No model downloads without approval.
+No system-wide installs or external services. Test all existing functionality.
+Commit milestones locally, update state/roadmap after the phase, ask before pushing
+Phase 3, and propose but do not create/push v0.3.0 until release approval.
 
 ## Security and privacy rules
 
@@ -161,4 +161,4 @@ Report actual coverage separately from estimates. Keep private CSVs, local confi
 databases/caches/backups and all personal documents ignored. Only the reviewed public
 examples/employers.example.csv is exempt from CSV exclusions. Commit tested milestones
 and ask before pushing. Preserve v0.2.0; do not tag a new release without instruction.
-Do not start Phase 3.
+Do not start Phase 3.5 or later.

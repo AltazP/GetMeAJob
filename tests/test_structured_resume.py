@@ -60,6 +60,17 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(value,'jordan@example.invalid');self.assertTrue(notes)
         value,notes=clean('Meaningful\ue123symbol')
         self.assertIn('\ue123',value);self.assertTrue(notes)
+    def test_capitalized_wrapped_bullet_and_unmarked_new_achievement(self):
+        record=parse('Experience\nDeveloper | Fictional Labs\n• Built reports using Python and\nSQL for synthetic data\nDesigned independent reports.')[0]
+        self.assertEqual(record['structure']['achievements'],['Built reports using Python and SQL for synthetic data','Designed independent reports.'])
+        self.assertTrue(record['warnings'])
+    def test_education_dates_are_not_phone_numbers(self):
+        facts=parse('Education\nSynthetic University\n2020 - 2024')
+        self.assertTrue(all(f['category']=='education' for f in facts))
+    def test_unknown_mojibake_is_flagged_not_guessed(self):
+        value,notes=clean('Text â€¢ with broken encoding')
+        self.assertEqual(value,'Text â€¢ with broken encoding')
+        self.assertTrue(any('encoding artifact' in note for note in notes))
     def test_unknown_headers_not_invented(self):
         fact=parse('Experience\nAmbiguous company text\n• Built a synthetic tool.')[0]
         self.assertEqual(fact['structure']['title'],'')

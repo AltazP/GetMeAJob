@@ -15,12 +15,16 @@ SECTIONS = {
 GROUPS={'Personal Information':('personal',),'Education':('education','university','program'),
         'Experience':('employment',),'Skills':('skills','tools'),'Projects':('projects',),
         'Other Information':('coursework','certifications','achievements','other')}
-BULLET=re.compile(r'^\s*[•●▪◦‣\-*]\s+')
+BULLET=re.compile(r'^\s*[•●▪◦‣\uf0b7\-*]\s+')
 DATE=r'(?:\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+)?(?:19|20)\d{2}\b'
 RANGE=re.compile(r'('+DATE+r')\s*(?:–|—|-|\bto\b)\s*(Present|Current|Now|'+DATE+r')',re.I)
 ROLE=re.compile(r'\b(?:engineer|developer|analyst|intern|assistant|manager|coordinator|specialist|associate|technician|consultant|designer|officer|lead|co-op|representative)\b',re.I)
-CONTACT=re.compile(r'@|https?://|www\.|linkedin\.com|github\.com|(?:\+?\d[\d ().-]{7,}\d)',re.I)
+CONTACT=re.compile(r'@|https?://|www\.|linkedin\.com|github\.com',re.I)
 LIGATURES=str.maketrans({'ﬀ':'ff','ﬁ':'fi','ﬂ':'fl','ﬃ':'ffi','ﬄ':'ffl','ﬅ':'st','ﬆ':'st','\u00a0':' '})
+
+
+def contact(text):
+    return bool(CONTACT.search(text)) or any(sum(c.isdigit() for c in m[0])>=10 for m in re.finditer(r'\+?\d[\d ().-]{7,}\d',text))
 
 
 def clean(text):
@@ -28,12 +32,13 @@ def clean(text):
     notes=[]
     if value!=text: notes.append('Normalized standard ligature/nonbreaking-space typography; compare original evidence.')
     # Only standalone private-use icon tokens adjacent to an actual URL/email are decorative.
-    if CONTACT.search(value):
+    if contact(value):
         replaced=re.sub(r'(?<!\S)[\ue000-\uf8ff]+(?=\s|$)','',value)
         if replaced!=value:
             notes.append('Removed standalone private-use contact icon; original evidence retained.')
             value=replaced
     unusual=sorted({c for c in value if c=='\ufffd' or unicodedata.category(c) in ('Co','Cs','Cc') and c not in '\n\t\r'})
+    if re.search(r'Ã.|Â.|â[€™œ•]',value): notes.append('Possible encoding artifact; compare with the original document. Text was not guessed or replaced.')
     if unusual: notes.append('Uninterpreted character(s): '+', '.join('U+%04X'%ord(c) for c in unusual)+'. Correct against the source before verifying.')
     if re.search(r'\(cid:\d+\)',value): notes.append('Unresolved PDF character ID; original text retained for correction.')
     return value.strip(),notes
@@ -91,7 +96,7 @@ def parse(text):
         else:
             current=[]
             for raw,line in block:
-                is_contact=bool(CONTACT.search(line)) and not BULLET.match(line)
+                is_contact=contact(line) and not BULLET.match(line)
                 if section=='personal' or is_contact:
                     if current: emit(section,current);current=[]
                     emit('personal',[(raw,line)])
@@ -143,7 +148,10 @@ def parse_experience(entries,emit):
         evidence.append((raw,line))
         if marked: bullets.append(BULLET.sub('',line))
         elif not bullets: header.append(line)
-        elif not last_blank and (raw[:1].isspace() or line[:1].islower()): bullets[-1]+=' '+line
+        elif not last_blank and not re.match(r'^(?:Built|Led|Created|Designed|Reduced|Developed|Managed|Improved|Implemented|Collaborated|Analyzed)\b',line) and (raw[:1].isspace() or line[:1].islower() or not re.search(r'[.!?;:]$',bullets[-1])):
+            if bullets[-1].endswith('-'):
+                bullets[-1]+=line; warnings.append('Wrapped hyphen retained; confirm spelling against source.')
+            else: bullets[-1]+=' '+line
         else:
             bullets.append(line); warnings.append('Unmarked achievement boundary: confirm that these are separate bullets.')
         last_blank=False

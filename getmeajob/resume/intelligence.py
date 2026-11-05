@@ -22,7 +22,7 @@ def weights(value):
 
 def match(job,facts,configuration=None):
     configuration=weights(configuration or DEFAULT_WEIGHTS)
-    facts=[f for f in facts if f['status']=='verified']
+    facts=[f for f in facts if f['status']=='verified' and f['category']!='personal']
     text=job.role+' '+job.description
     verified=' '.join(f['value'] for f in facts)
     wanted=[skill for skill in CATALOG if present(skill,text)]
@@ -66,7 +66,7 @@ def jobs(path: Path):
 
 
 def letter(job,facts,model=None):
-    approved=[f for f in facts if f['status']=='verified']
+    approved=[f for f in facts if f['status']=='verified' and f['category']!='personal']
     if not approved: raise ValueError('Verify at least one fact before generating a letter.')
     ranked=sorted(approved,key=lambda f: -sum(present(t,job.description+' '+job.role) for t in re.findall(r'\w+',f['value']) if len(t)>3))[:8]
     mode='deterministic'

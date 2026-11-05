@@ -13,7 +13,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from getmeajob.resume.store import ProfileStore, CATEGORIES
-from getmeajob.resume.extract import extract, candidates, MAX_FILE
+from getmeajob.resume.extract import extract, MAX_FILE
+from getmeajob.resume.parser import parse, GROUPS
 from getmeajob.resume.intelligence import jobs, match, letter, weights, DEFAULT_WEIGHTS
 from getmeajob.resume.documents import export
 from getmeajob.models import utc_now
@@ -66,7 +67,7 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
                     if size>MAX_FILE+128000: return Response('Upload too large',status_code=413)
                     chunks.append(chunk)
                 request._body=b''.join(chunks)
-                try: form=await request.form(max_files=1,max_fields=30,max_part_size=MAX_FILE)
+                try: form=await request.form(max_files=1,max_fields=4000,max_part_size=MAX_FILE)
                 except Exception: return Response('Invalid form',status_code=400)
                 if not secrets.compare_digest(str(form.get('csrf','')),session['csrf']):
                     await form.close()
@@ -137,18 +138,83 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         try: text=extract(upload.filename or '',data)
         except ValueError as exc: return page(request,'Upload needs attention',screen='message',message=str(exc))
         filename=Path((upload.filename or 'resume').replace('\\','/')).name[:120]
-        identity=store.upload(str(form.get('label') or filename),filename,data,text,candidates(text))
+        identity=store.upload(str(form.get('label') or filename),filename,data,text,parse(text))
         return RedirectResponse(f'/resumes/{identity}',303)
 
     @app.get('/resumes/{identity}')
     async def resume_page(request:Request,identity:int):
-        return page(request,'Review your profile facts',screen='resume',resume=store.resume(identity),facts=store.facts(identity))
+        facts=store.facts(identity)
+        return page(request,'Review your structured profile',screen='resume',resume=store.resume(identity),facts=facts,
+            groups={name:[f for f in facts if f['category'] in categories] for name,categories in GROUPS.items()},
+            counts={status:sum(f['status']==status for f in facts) for status in ('pending','verified','rejected')},revision=store.revision(identity))
 
     @app.post('/resumes/{identity}/facts')
     async def save_fact(request:Request,identity:int):
         form=await request.form()
         store.fact(identity,str(form.get('category')),str(form.get('value','')),str(form.get('status')),int(form['fact_id']) if form.get('fact_id') else None)
         return RedirectResponse(f'/resumes/{identity}',303)
+
+    @app.post('/resumes/{identity}/review-section')
+    async def review_section(request:Request,identity:int):
+        form=await request.form(); section=str(form.get('section',''))
+        if section not in GROUPS: raise ValueError('Invalid section.')
+        facts=[f for f in store.facts(identity) if f['category'] in GROUPS[section]]
+        operation=str(form.get('operation','save-section'))
+        if operation not in ('save-section','verify-section') and not operation.startswith(('save:','verify:','reject:')):
+            raise ValueError('Invalid review operation.')
+        confirm=form.get('confirm')=='yes'
+        if operation=='verify-section' and not confirm:
+            return page(request,'Confirmation required',screen='message',message='Confirm that you reviewed this section, including flagged text, before verifying it.')
+        if ':' in operation:
+            action,chosen=operation.split(':',1); facts=[f for f in facts if f['id']==int(chosen)]
+            if not facts: raise ValueError('Fact does not belong to this section.')
+        else: action=operation
+        updates=[]
+        for fact in facts:
+            prefix='f_'+str(fact['id'])+'_'
+            status=str(form.get(prefix+'status',fact['status']))
+            if action=='verify' or (action=='verify-section' and status!='rejected'): status='verified'
+            if action=='reject': status='rejected'
+            update={'id':fact['id'],'category':str(form.get(prefix+'category',fact['category'])),'status':status}
+            if fact['structure'] is not None:
+                record={key:str(form.get(prefix+key,fact['structure'].get(key,''))).strip() for key in ('employer','title','location','start_date','end_date','header_unassigned')}
+                record['achievements']=[line.strip().lstrip('•').strip() for line in str(form.get(prefix+'achievements','\n'.join(fact['structure']['achievements']))).splitlines() if line.strip()]
+                update['structure']=record
+            else: update['value']=str(form.get(prefix+'value',fact['value']))
+            # Saving an edit alone never inherits an old verified status.
+            from getmeajob.resume.parser import render_position
+            value=render_position(update['structure']) if 'structure' in update else update['value'].strip()
+            if status=='verified' and action not in ('verify','verify-section') and (value!=fact['value'] or update['category']!=fact['category'] or fact['status']!='verified'):
+                update['status']='pending'
+            updates.append(update)
+        store.review(identity,updates,str(form.get('revision','')),confirm=confirm or action=='verify')
+        return RedirectResponse(f'/resumes/{identity}#section-'+str(list(GROUPS).index(section)),303)
+
+    @app.get('/resumes/{identity}/review-all')
+    async def review_all(request:Request,identity:int):
+        return page(request,'Final review before verification',screen='review-all',resume=store.resume(identity),facts=store.facts(identity),revision=store.revision(identity))
+
+    @app.post('/resumes/{identity}/verify-all')
+    async def verify_all(request:Request,identity:int):
+        form=await request.form()
+        if form.get('confirm')!='yes': return Response('Explicit confirmation is required.',status_code=400)
+        facts=store.facts(identity)
+        store.review(identity,[{'id':f['id'],'status':'verified'} for f in facts if f['status']=='pending'],str(form.get('revision','')),confirm=True)
+        return RedirectResponse(f'/resumes/{identity}',303)
+
+    @app.get('/resumes/{identity}/reprocess')
+    async def reprocess_preview(request:Request,identity:int):
+        resume=store.resume(identity)
+        return page(request,'Preview structured reprocessing',screen='reprocess',resume=resume,parsed=parse(resume['text']),revision=store.revision(identity))
+
+    @app.post('/resumes/{identity}/reprocess')
+    async def reprocess_confirm(request:Request,identity:int):
+        form=await request.form()
+        if form.get('confirm')!='yes' or str(form.get('revision',''))!=store.revision(identity):
+            return Response('Confirm a fresh preview before reprocessing.',status_code=400)
+        original=store.resume(identity)
+        new=store.reprocess(identity,parse(original['text']),confirmed=True)
+        return RedirectResponse(f'/resumes/{new}',303)
 
     @app.post('/resumes/{identity}/default')
     async def default_resume(request:Request,identity:int):

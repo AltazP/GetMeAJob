@@ -104,7 +104,7 @@ class ProfileStore:
                     (category,value.strip(),status,utc_now(),fact_id))
             else:
                 db.execute('INSERT INTO facts(resume_id,category,value,status,evidence,updated) VALUES(?,?,?,?,?,?)',
-                    (identity,category,value.strip(),status,'User supplied',utc_now()))
+                    (identity,category,value.strip(),status,'User supplied: '+value.strip(),utc_now()))
 
     def default(self,identity):
         self.resume(identity)

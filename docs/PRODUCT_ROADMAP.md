@@ -14,6 +14,9 @@ PHASE 3 (implemented locally; see phase-3.md for limits):
 - Personalized and truthful cover letters
 - Editable and downloadable application packages
 - Simple local interface using FastAPI/Jinja2
+- Structured resume records and evidence-preserving text cleanup
+- Collapsible section review, whole-position editing and explicit bulk verification
+- Preview-and-confirm reprocessing that preserves old resume versions and verified facts
 
 PHASE 3.5:
 - Top 15 opportunity prioritization

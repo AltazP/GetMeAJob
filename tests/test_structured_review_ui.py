@@ -74,3 +74,13 @@ class StructuredReviewTests(unittest.TestCase):
         data.update(revision=store.revision(identity),csrf='bad')
         self.assertEqual(self.client.post(url+'/verify-all',data=data).status_code,403)
         self.assertFalse(store.facts(identity,True))
+    def test_final_bulk_verification_keeps_rejected_records_rejected(self):
+        self.login();store=self.app.state.store
+        identity=store.upload('Structured','test.pdf',b'old',SYNTHETIC,parse(SYNTHETIC));url=f'/resumes/{identity}'
+        rejected=store.facts(identity)[0]
+        store.review(identity,[{'id':rejected['id'],'status':'rejected'}],store.revision(identity))
+        data={'csrf':self.csrf(url+'/review-all'),'revision':store.revision(identity),'confirm':'yes'}
+        self.assertEqual(self.client.post(url+'/verify-all',data=data,follow_redirects=False).status_code,303)
+        facts=store.facts(identity)
+        self.assertEqual(next(f for f in facts if f['id']==rejected['id'])['status'],'rejected')
+        self.assertTrue(all(f['status']=='verified' for f in facts if f['id']!=rejected['id']))

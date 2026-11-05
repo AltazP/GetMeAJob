@@ -181,3 +181,12 @@ phase. Preserve private originals and immutable package/history versions. The jo
 store is read-only from the dashboard. Full tests need requirements-phase3.txt.
 Phase 3 commits are local only; ask before a push. Propose v0.3.0 but do not create
 or publish it without release approval. Do not start Phase 3.5 or later.
+
+Phase 3 correction: new uploads use conservative structured extraction and retain
+verbatim source evidence. Employment achievements belong to a position record.
+Uncertain characters or headers remain visible for user correction. The grouped
+interface supports individual and section review; Verify All requires an explicit
+final confirmation. Legacy resume reprocessing creates a new all-pending version only
+after preview and confirmation, preserving old versions, verified facts and packages.
+Matching and generated letters use verified qualification facts only. Never treat
+personal contact details as qualification evidence. Keep tests synthetic and offline.

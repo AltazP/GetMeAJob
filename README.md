@@ -12,7 +12,7 @@ postings in SQLite and display unique matching jobs in Terminal. These APIs do
 API examples, not a personalized list of recommended employers.
 
 An offline demo uses clearly fictional employers and an in-memory database.
-Resume upload, verified profiles, explainable matching, reviewable letters and package
+Resume upload, grouped profile review, explainable matching, reviewable letters and package
 downloads now work in the local browser interface. Email, scheduling, outreach, autofill
 and submission remain future phases. Running the application with no subcommand prints a readiness
 message; it does not start a server.
@@ -28,8 +28,17 @@ cd ~/Projects/GetMeAJob
 
 On first start, open the one-time setup link printed in Terminal and create your
 local password. Later use **http://127.0.0.1:8000**. Keep Terminal open; stop with
-**Control+C**. Resume upload, fact verification, resume versions/defaults, matching,
-letter editing and TXT/DOCX/PDF/ZIP downloads are browser-based.
+**Control+C**. If the server is already running, restart it with the command above.
+The page groups Personal Information, Education, Experience, Skills, Projects and
+Other Information into collapsible sections. Edit and verify one record, verify a
+reviewed section, or use Review and Verify All with explicit confirmation. Each
+employment record keeps its company, title, dates, location and achievements together.
+
+For a resume uploaded before this correction, open it and select **Preview structured
+reprocessing**. Check the preview, then confirm creation of a new pending version.
+The old resume and its verified facts stay available. Review and verify the new copy,
+then make it your default from the Resumes page if desired. Matching, letter editing
+and TXT/DOCX/PDF/ZIP downloads remain browser-based.
 
 On a fresh checkout, first install the free project-local dependencies:
 

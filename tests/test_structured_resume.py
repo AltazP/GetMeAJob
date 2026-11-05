@@ -120,6 +120,13 @@ class StructuredStoreTests(unittest.TestCase):
         self.assertIn('Built Python services that processed synthetic records using SQLite.',text)
         self.assertIn('Fictional Labs',text);self.assertNotIn('Example Tools',text)
         self.assertEqual(ids,[employment['id']])
+    def test_verified_contact_details_are_not_qualification_evidence(self):
+        facts=self.store.facts(self.identity)
+        personal=next(f for f in facts if '@' in f['value'])
+        self.store.review(self.identity,[{'id':personal['id'],'status':'verified'}],self.store.revision(self.identity),confirm=True)
+        approved=self.store.facts(self.identity)
+        self.assertFalse(match(job(),approved)['relevant_experience'])
+        with self.assertRaises(ValueError): letter(job(),approved)
     def test_schema_one_migration_preserves_all_existing_values(self):
         with self.store.connect() as db:
             # A separate realistic v1 file, not the migrated database.

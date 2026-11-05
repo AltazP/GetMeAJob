@@ -47,22 +47,36 @@ are checked exactly. This is a local HTTP application, not a remotely hosted ser
 1. **Resumes:** upload a text-based PDF or DOCX and give it a version label. The
    original bytes and extracted text are stored locally. Every upload is a new,
    immutable original resume version. Choose a default with Make default.
-2. **Review facts:** preview extraction, correct the text/category, and explicitly
-   select pending, verified or rejected. Add missing facts using the browser. Categories
-   include education, university, program, coursework, employment, skills, tools,
-   projects, certifications and achievements. Extraction never verifies anything.
-   Here, verified means confirmed by you, not authenticated by a university/employer.
-   Fact edits keep previous value/status history. Ordinary management needs no CLI.
-3. **Matching jobs:** compare your versions against real stored jobs. Search by
+2. **Review your profile:** use the collapsible Personal Information, Education,
+   Experience, Skills, Projects and Other Information sections. New uploads extract
+   complete employment records with company, job title, location, dates and associated
+   achievement bullets. Edit a record inline and Save, Verify or Reject it. Each
+   section also offers Save section edits and Save and Verify Section. The latter
+   requires a checked confirmation that you reviewed all records and warnings in it.
+   The header shows pending, verified and rejected counts. Add missing facts using
+   the browser. Extraction never verifies anything. Here, verified means confirmed
+   by you, not authenticated by a university or employer. Editing a verified record
+   makes it pending until you verify the correction. Its original evidence and
+   earlier value/status history remain available.
+3. **Final review:** Review and Verify All shows every saved pending fact and its
+   warning/source evidence. Check the explicit confirmation box to verify those
+   pending facts together. Rejected facts remain rejected. Unsaved edits are not
+   included; save them first. A changed profile makes a stale review form fail.
+4. **Existing resumes:** open an older resume and select Preview structured
+   reprocessing. Compare the preview against the original, then confirm. This makes
+   a new resume version from the stored original text with all facts pending. It does
+   not change the original resume, verified facts, packages or default selection.
+   Verify the new copy and choose Make default on the Resumes page if wanted.
+5. **Matching jobs:** compare your versions against real stored jobs. Search by
    employer/role and browse 30 results per page. The best score selects a recommended
    resume; equal scores prefer the default. Existing stored postings may be stale.
-4. **Prepare draft package:** use verified facts to generate a deterministic cover
+6. **Prepare draft package:** use verified facts to generate a deterministic cover
    letter and a snapshot of the original job, selected resume, score/evidence,
    uncertainty and missing information. No verified facts means no generated letter.
-5. **Review and edit:** change the letter, add your signature/contact details and
+7. **Review and edit:** change the letter, add your signature/contact details and
    select draft or reviewed. Saving creates a new package version; previous versions
    remain intact. Reviewed never authorizes submission.
-6. **Download:** TXT, DOCX and PDF contain the saved letter version. ZIP includes
+8. **Download:** TXT, DOCX and PDF contain the saved letter version. ZIP includes
    the original selected resume, letter text/DOCX and package JSON with job description,
    source URL, score and verified evidence. The uploaded resume itself is not rewritten;
    review it separately for claims you have not verified. Downloads require login.
@@ -140,9 +154,17 @@ reliable hard memory limit. This is not antivirus or an OS sandbox.
 
 Scanned/image-only, encrypted or malformed documents produce a useful browser error;
 OCR is not installed. DOCX table text is supported, but layouts and section detection
-are heuristic. Contact/header lines can be misclassified and must be corrected before
-verification. PDF exports use standard fonts and may not render every non-Latin glyph;
-DOCX/TXT remain alternatives. Originals are stored, not converted in place.
+are heuristic. The structured parser recognizes common headings and position layouts.
+Contact details before a heading stay in Personal Information. Standard ligatures and
+nonbreaking spaces are normalized with a visible note; private-use contact icons are
+removed only when surrounding contact text makes them decorative. Unknown PDF
+character IDs, replacement characters and likely encoding artifacts are retained
+and flagged for comparison with the original. Original text is never overwritten.
+Columns, unusual headings, ambiguous company/title ordering and unmarked achievement
+boundaries still need review. Wrapped bullet lines are joined conservatively; their
+verbatim source lines remain in each record's evidence. PDF exports use standard fonts
+and may not render every non-Latin glyph; DOCX/TXT remain alternatives. Originals
+are stored, not converted in place.
 
 No resumes, passwords, sessions, original documents or packages belong in Git.
 Existing private/data exclusions cover all of these. The interface reads the jobs
@@ -150,12 +172,15 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **148 passing tests, zero failures**. Original Phase 1/2/2.5 tests
+The full suite has **168 passing tests, zero failures**. Original Phase 1/2/2.5 tests
 are unchanged. Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
 Host/Origin checks, upload limits, session rotation/restart, login throttling, XSS
-escaping, browser routes and all four download formats. The setup layout and a
+escaping, browser routes and all four download formats. The correction adds synthetic
+tests for multiline bullets, position grouping, contact classification, Unicode
+cleanup, section/bulk authorization, migration and preservation, and factual letter
+generation. The setup layout and a
 synthetic PDF export were visually inspected. No real resume or credential was used.
 The installed Starlette test client emits a non-failing HTTPX deprecation warning;
 it does not affect normal dashboard operation.

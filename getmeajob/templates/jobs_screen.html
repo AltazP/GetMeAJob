@@ -58,7 +58,7 @@
 <li>Experience level: {{ item.level or 'Unknown' }}{% if item.level %} <small>({{ item.level_reason }})</small>{% endif %}</li>
 <li>Salary: {% if item.job.salary.minimum is not none %}{{ item.job.salary.minimum|int }}{% if item.job.salary.maximum is not none %}–{{ item.job.salary.maximum|int }}{% endif %} {{ item.job.salary.currency or '' }} {{ item.job.salary.interval or '' }}{% else %}Unknown{% endif %}</li>
 <li>Posted: {{ item.job.posted_at[:10] if item.job.posted_at else 'Unknown' }} · Last checked {{ item.checked[:10] }}</li></ul>
-<p><small>Stored job; verify the original posting is still open.</small></p>
+<p>{% if item.link %}<a href="{{ item.link }}" target="_blank" rel="noopener noreferrer">Open the posting / apply on the company site</a>{% else %}<small>No link stored for this job.</small>{% endif %} {% if item.can_fill %}<span class="status verified">Auto-fill available</span>{% else %}<span class="status pending">Apply on the site yourself</span>{% endif %}<br><small>Stored job; verify the original posting is still open.</small></p>
 {% if item.score is not none %}<strong>{{ item.score }}% match</strong>{% if item.match.low_evidence %} <small>(low evidence: few comparable details in this posting or resume)</small>{% endif %}{% else %}<strong>No score yet</strong> <small>Verify facts in a resume version to see a match.</small>{% endif %}
 <p>Recommended resume: {{ item.resume.label if item.resume else 'None' }}</p>
 {% if item.match %}<p><em>{{ item.match.summary }}</em></p><p>Matched skills: {{ item.match.matched_skills|join(', ') or 'None identified' }}</p><p>Not evidenced, not confirmed mismatches: {{ item.match.not_evidenced_skills|join(', ') or 'None identified' }}</p>

@@ -215,19 +215,102 @@ def job_by_id(path: Path, identity: int):
     finally: db.close()
 
 
-def letter(job,facts,model=None):
+IRREGULAR_VERBS={'led','built','ran','wrote','drove','won','made','took','taught','began','grew','sold','set','cut','put','held','kept','gave','got','found','did','spoke','chose','taught'}
+
+
+def _clause(text):
+    return re.sub(r'\s+',' ',text).strip().rstrip('.;,')
+
+
+def _lower_first(text):
+    return text[0].lower()+text[1:] if text[1:2].islower() else text   # leave acronyms such as SQL alone
+
+
+def _verb_led(text):
+    word=re.match(r'[A-Za-z]+',text)
+    return bool(word) and (word.group(0).casefold().endswith('ed') or word.group(0).casefold() in IRREGULAR_VERBS)
+
+
+SPECIAL_NAMES={'sql':'SQL','aws':'AWS','gcp':'GCP','css':'CSS','html':'HTML','php':'PHP','etl':'ETL','crm':'CRM','erp':'ERP','nlp':'NLP','seo':'SEO',
+    'sem':'SEM','sap':'SAP','vba':'VBA','gaap':'GAAP','cad':'CAD','plc':'PLC','hris':'HRIS','cpa':'CPA','dbt':'dbt','javascript':'JavaScript','typescript':'TypeScript',
+    'nosql':'NoSQL','git':'Git','fastapi':'FastAPI','sqlite':'SQLite','ci/cd':'CI/CD','fp&a':'FP&A','a/b testing':'A/B testing','power bi':'Power BI','qa':'QA',
+    'ai':'AI','ml':'ML','r':'R','c++':'C++','c#':'C#','devops':'DevOps','graphql':'GraphQL','kubernetes':'Kubernetes','rest api':'REST APIs','golang':'Go',
+    'hr':'HR','human resources':'human resources','artificial intelligence':'artificial intelligence'}
+
+
+def _pretty(term):
+    return SPECIAL_NAMES.get(term) or (term if ' ' in term else term.capitalize())
+
+
+def _list(items):
+    items=list(items)
+    return ', '.join(items[:-1])+' and '+items[-1] if len(items)>1 else (items[0] if items else '')
+
+
+def _relevance(text,wanted,title_words,job_tokens):
+    from getmeajob.resume.vocabulary import find_terms
+    return 3*len(set(find_terms(text))&set(wanted))+2*len(_words(text)&title_words)+len(_tokens(text,4)&job_tokens)
+
+
+def _article(word):
+    return 'an' if word[:1].casefold() in 'aeiou' else 'a'
+
+
+def _experience_sentence(fact,wanted,title_words,job_tokens):
+    record=fact.get('structure')
+    if not record:
+        return 'My experience includes '+_clause(fact['value'].split('\n')[0])[:260]+'.'
+    title,company=_clause(record.get('title','')),_clause(record.get('employer',''))
+    lead=(f'In my role as {_article(title)} {title} at {company}' if title and company else f'At {company}' if company else f'In my role as {_article(title)} {title}' if title else 'In a previous role')
+    bullets=sorted((_clause(b) for b in record.get('achievements',[]) if _clause(b)),key=lambda b:-_relevance(b,wanted,title_words,job_tokens))
+    if not bullets: return lead+'.'
+    first=bullets[0]
+    sentence=f'{lead}, I {_lower_first(first)}.' if _verb_led(first) else f'{lead}, my work included: {first}.'
+    if len(bullets)>1 and _verb_led(bullets[1]) and _relevance(bullets[1],wanted,title_words,job_tokens)>0:
+        sentence+=f' I also {_lower_first(bullets[1])}.'
+    return sentence
+
+
+def letter(job,facts,model=None,name=None):
+    """Truthful, job-specific letter built only from verified facts; wording around them is fixed templates."""
+    from getmeajob.resume.vocabulary import find_terms
     approved=[f for f in facts if f['status']=='verified' and f['category']!='personal']
     if not approved: raise ValueError('Verify at least one fact before generating a letter.')
-    ranked=sorted(approved,key=lambda f: -sum(present(t,job.description+' '+job.role) for t in re.findall(r'\w+',f['value']) if len(t)>3))[:8]
+    text=job.role+' '+job.description
+    wanted=find_terms(text)
+    title_words={_stem(w) for w in re.findall(r'[a-z][a-z+#/-]*',job.role.casefold()) if w not in GENERIC_TITLE and len(w)>2}
+    job_tokens=_tokens(text,4)
+    score=lambda f:_relevance(f['value'],wanted,title_words,job_tokens)
+    ranked=sorted(approved,key=lambda f:-score(f))[:8]
     mode='deterministic'
     if model:
         order=local_order([f['value'] for f in ranked],model)
         if order is not None:
             ranked=[ranked[i] for i in order]; mode='local AI ordering with deterministic text'
-    body='\n'.join('- '+f['value'] for f in ranked)
-    # Literal approved facts only. No claims about employer missions, achievements or invented fit.
-    text=f'Dear Hiring Team,\n\nI am applying for the {job.role} position at {job.employer}.\n\nThe following details from my verified profile are relevant for your review:\n\n{body}\n\nThank you for considering my application. I would welcome the opportunity to discuss this role.\n\nSincerely,\nApplicant'
-    return text, [f['id'] for f in ranked], mode
+    pick=lambda cats,count:([f for f in ranked if f['category'] in cats and score(f)>0] or [f for f in ranked if f['category'] in cats])[:count]
+    experience,projects,education=pick(('employment',),2),pick(('projects',),2),pick(('education','university','program','coursework'),1)
+    prepared_terms=set(find_terms(' '.join(f['value'] for f in approved)))
+    shared=[t for t in wanted if t in prepared_terms][:4]
+    seed=sum(map(ord,job.role+job.employer))%3
+    fit=(f"The focus on {_list([_pretty(t) for t in shared])} in this role connects directly to my background, and I would like to bring that experience to your team." if shared
+         else 'I would welcome the chance to bring my background to your team.')
+    opening=(f"I am excited to apply for the {job.role} position at {job.employer}. {fit}",
+             f"Please accept my application for the {job.role} role at {job.employer}. {fit}",
+             f"I am writing to express my interest in the {job.role} opportunity at {job.employer}. {fit}")[seed]
+    paragraphs=[opening]
+    if experience: paragraphs.append(' '.join(_experience_sentence(f,wanted,title_words,job_tokens) for f in experience))
+    if projects:
+        lines=[_clause(f['value'].split('\n')[0])[:240] for f in projects]
+        paragraphs.append('Project work I would highlight: '+'; '.join(lines)+'.')
+    if education:
+        paragraphs.append('My education includes '+_clause(education[0]['value'].split('\n')[0])[:240]+'.')
+    if not (experience or projects or education):
+        skills=[_clause(f['value']) for f in ranked if f['category'] in ('skills','tools')][:3]
+        paragraphs.append('My background includes '+_list(skills)+'.' if skills else 'I have reviewed the requirements and would be glad to discuss my background.')
+    paragraphs.append(f"I would welcome the opportunity to discuss how I can contribute to {job.employer}. Thank you for your time and consideration.")
+    used=[f['id'] for f in (*experience,*projects,*education)] or [f['id'] for f in ranked[:3]]
+    body='\n\n'.join(paragraphs)
+    return f"Dear {job.employer} Hiring Team,\n\n{body}\n\nSincerely,\n{name or '[Your name]'}",used,mode
 
 
 def local_order(values,model):

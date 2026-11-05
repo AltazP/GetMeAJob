@@ -17,7 +17,7 @@ from getmeajob.resume.store import ProfileStore, CATEGORIES
 from getmeajob.resume.extract import extract, MAX_FILE
 from getmeajob.resume.parser import parse, GROUPS
 from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, weights, stored_weights, DEFAULT_WEIGHTS
-from getmeajob import jobfilters, jobsquery, notify
+from getmeajob import apply_assist, jobfilters, jobsquery, notify
 from getmeajob.classify import FIELDS, LEVELS
 from getmeajob.locations import PROVINCES
 from datetime import datetime, timezone
@@ -249,7 +249,9 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
             items=[]
             for row in result.rows:
                 resume=result.best.get(row.id); m=result.matches.get((row.id,resume['id'])) if resume else None
-                items.append({'id':row.id,'job':row.job,'checked':row.checked,'resume':resume,'match':m,'score':row.score,
+                try: apply_assist.apply_url(row.job.to_dict()); can_fill=True
+                except ValueError: can_fill=False
+                items.append({'id':row.id,'job':row.job,'link':notify.safe_link(row.job.original_url,row.job.application_url),'can_fill':can_fill,'checked':row.checked,'resume':resume,'match':m,'score':row.score,
                     'field':row.field,'field_reason':row.field_reason,'level':row.level,'level_reason':row.level_reason,'is_new':row.is_new})
             age=None
             if result.newest_check:
@@ -321,6 +323,7 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
             if not isinstance(saved,dict) or saved.get('version')!=jobfilters.PREFERENCES_VERSION or not isinstance(saved.get('filters'),dict):
                 raise jobfilters.FilterError('The filters could not be read. Apply your filters and try again.')
             filters=jobfilters.parse(saved['filters']); jobfilters.validate_location(filters)
+            if not jobfilters.is_narrow(filters): raise jobfilters.FilterError(jobfilters.NARROW_MESSAGE)
             store.add_preset(str(form.get('name','')),jobfilters.dump_preferences(filters))
         except json.JSONDecodeError:
             return notifications_page(request,'The filters could not be read. Apply your filters and try again.',400)
@@ -351,7 +354,8 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         form=await request.form(); job_id=int(form['job_id']); resume_id=int(form['resume_id'])
         job,checked=get_job(job_id); resume=store.resume(resume_id); facts=store.facts(resume_id)
         configuration=load_weights()
-        text,ids,mode=letter(job,facts,str(form.get('model','')) or None)
+        details=json.loads(store.get_setting('applicant','{}')); name=' '.join(x for x in (details.get('first_name'),details.get('last_name')) if x) or None
+        text,ids,mode=letter(job,facts,str(form.get('model','')) or None,name)
         payload={'employer':job.employer,'position':job.role,'original_url':job.original_url or job.application_url,
             'job':job.to_dict(),'job_last_checked':checked,'resume':{k:v for k,v in resume.items() if k!='content'},
             'match':match(job,facts,configuration),'verified_facts':[f for f in facts if f['status']=='verified'],
@@ -361,9 +365,42 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         identity=store.package(job_id,resume_id,payload,text)
         return RedirectResponse(f'/packages/{identity}',303)
 
+    def package_screen(request,identity,assist_error=None,status_code=200):
+        package=store.get_package(identity)
+        try: apply_assist.prepare(store,identity); ready=True
+        except ValueError as exc: ready=False; assist_error=assist_error or (str(exc) if package['status']=='reviewed' else None)
+        return page(request,'Review application package',status_code=status_code,screen='package',package=package,can_assist=ready,
+            posting_link=notify.safe_link(package['payload'].get('original_url'),(package['payload'].get('job') or {}).get('application_url')),
+            assist_error=assist_error,applications=store.applications(identity))
+
+    @app.get('/applicant')
+    async def applicant(request:Request):
+        return page(request,'Applicant details',screen='applicant',applicant=json.loads(store.get_setting('applicant','{}')),error=None,saved=False)
+
+    @app.post('/applicant')
+    async def save_applicant(request:Request):
+        form=await request.form()
+        try: clean=apply_assist.validate_applicant({k:form.get(k,'') for k in apply_assist.APPLICANT_FIELDS})
+        except ValueError as exc:
+            return page(request,'Applicant details',status_code=400,screen='applicant',applicant={k:str(form.get(k,'')) for k in apply_assist.APPLICANT_FIELDS},error=str(exc),saved=False)
+        store.set_setting('applicant',json.dumps(clean))
+        return page(request,'Applicant details',screen='applicant',applicant=clean,error=None,saved=True)
+
+    @app.post('/packages/{identity}/assist')
+    async def assist(request:Request,identity:int):
+        try: apply_assist.prepare(store,identity)
+        except ValueError as exc: return package_screen(request,identity,str(exc),400)
+        apply_assist.spawn(store.directory,identity,Path(__file__).resolve().parents[1])
+        return page(request,'Opening the application',screen='message',message='Chrome is opening the application form. Review every field, answer the remaining questions and press Submit yourself. Nothing is submitted for you. Close that window when you are done.')
+
+    @app.post('/packages/{identity}/applied')
+    async def applied(request:Request,identity:int):
+        package=store.get_package(identity); store.add_application(identity,package['job_id'],'applied_by_user')
+        return RedirectResponse(f'/packages/{identity}',303)
+
     @app.get('/packages/{identity}')
     async def package_page(request:Request,identity:int):
-        return page(request,'Review application package',screen='package',package=store.get_package(identity))
+        return package_screen(request,identity)
 
     @app.post('/packages/{identity}')
     async def edit_package(request:Request,identity:int):

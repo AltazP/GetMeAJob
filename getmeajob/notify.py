@@ -61,6 +61,9 @@ def build_digests(job_db: Path, store, scorer=match, limit: int = DIGEST_SIZE, o
             continue
         digest = Digest(preset)
         filters = preset_filters(preset)
+        if not jobfilters.is_narrow(filters):   # a preset with no real filter would email everything
+            digest.notes.append(jobfilters.NARROW_MESSAGE)
+            digests.append(digest); continue
         sent = store.sent_ids(preset["id"])
         try:
             result = jobsquery.run(job_db, store, filters, weights, scorer, 0, limit=limit, exclude=frozenset(sent))

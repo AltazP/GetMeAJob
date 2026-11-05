@@ -42,7 +42,7 @@ class ProfilesTests(unittest.TestCase):
         approved=self.store.facts(self.identity)
         self.assertIn('python',match(job(),approved)['matched_skills'])
         result,ids,_=letter(job(),approved)
-        self.assertIn('- Python',result); self.assertEqual(ids,[fact['id']]); self.assertNotIn('expert',result)
+        self.assertIn('Python',result); self.assertTrue(result.endswith('Sincerely,\n[Your name]')); self.assertEqual(ids,[fact['id']]); self.assertNotIn('expert',result)
         self.assertIn('sqlite',match(job(),approved)['not_evidenced_skills'])
     def test_package_versioning(self):
         a=self.store.package(1,self.identity,{'snapshot':'Synthetic'},'Letter')

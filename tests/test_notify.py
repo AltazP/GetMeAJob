@@ -86,6 +86,34 @@ class DigestTests(Base):
         self.assertIn('more matching', notify.render(small)[1])
 
 
+class OnlySelectedJobsTests(Base):
+    def test_email_contains_only_jobs_that_satisfy_every_selected_filter(self):
+        self.store.delete_preset(self.preset)
+        matching = dict(department=None, industry=None, employment_type='internship', work_arrangement='hybrid', locations=('Toronto, Canada',))
+        self.add(role='Finance Intern', employer='MatchCo', description='Excel financial modeling budgeting', **{**matching, 'department': 'Finance'})
+        self.add(role='Finance Analyst', employer='WrongType', description='Excel financial modeling', employment_type='full-time', department='Finance', industry=None, locations=('Toronto, Canada',))
+        self.add(role='Python SQL Intern', employer='WrongField', description='Python SQL', **matching)   # strong match for the resume, wrong field
+        self.add(role='Finance Intern', employer='WrongCountry', description='Excel financial modeling', department='Finance', industry=None, employment_type='internship', locations=('London, United Kingdom',))
+        self.add(role='Finance Intern Senior Role', employer='ExcludedWord', description='Excel', department='Finance', industry=None, employment_type='internship', locations=('Toronto, Canada',))
+        self.store.add_preset('Finance interns', jobfilters.dump_preferences(jobfilters.parse(q('field=Finance&type=internship&exclude=senior&canada=1'))))
+        digest = self.digests()[0]
+        self.assertEqual([i['row'].job.employer for i in digest.items], ['MatchCo'])
+        subject, text, html = notify.render(digest)
+        for other in ('WrongType', 'WrongField', 'WrongCountry', 'ExcludedWord', 'Rust Developer'):
+            self.assertNotIn(other, text + html)
+
+    def test_two_presets_get_separate_digests(self):
+        self.add(role='Gardener', employer='GreenCo', description='Plants', department=None, industry=None)
+        self.store.add_preset('Gardens', jobfilters.dump_preferences(jobfilters.parse(q('role=gardener'))))
+        names = {d.preset['name']: [i['row'].job.employer for i in d.items] for d in self.digests()}
+        self.assertNotIn('GreenCo', names['Devs']); self.assertNotIn('Acme', names.get('Gardens', []))
+
+    def test_preset_without_narrowing_filter_never_sends(self):
+        self.store.add_preset('Everything', jobfilters.dump_preferences(jobfilters.JobFilters()))
+        digest = [d for d in self.digests() if d.preset['name'] == 'Everything'][0]
+        self.assertEqual(digest.items, []); self.assertTrue(digest.notes)
+
+
 class SenderTests(unittest.TestCase):
     def test_gmail_sender_only_mails_the_owner_and_uses_keychain_password(self):
         server = MagicMock(); smtp = MagicMock(); smtp.return_value.__enter__.return_value = server
@@ -180,10 +208,17 @@ class DashboardTests(Base):
     def test_bad_input_shows_message_and_csrf_is_required(self):
         bad = self.post('/notifications/create', name='x', filters='not json')
         self.assertEqual(bad.status_code, 400); self.assertIn('could not be read', bad.text)
-        dup = self.post('/notifications/create', name='Devs', filters=jobfilters.dump_preferences(jobfilters.JobFilters()))
+        dup = self.post('/notifications/create', name='Devs', filters=jobfilters.dump_preferences(jobfilters.parse(q('min_score=10'))))
         self.assertEqual(dup.status_code, 400); self.assertIn('already exists', dup.text)
         for path in ('/notifications/create', '/notifications/toggle', '/notifications/delete'):
             self.assertEqual(self.client.post(path, data={'preset_id': '1'}).status_code, 403)
+
+    def test_preset_without_any_narrowing_filter_is_rejected(self):
+        blank = self.post('/notifications/create', name='Everything', filters=jobfilters.dump_preferences(jobfilters.JobFilters()))
+        self.assertEqual(blank.status_code, 400); self.assertIn('at least one filter', blank.text)
+        only_region = self.post('/notifications/create', name='Region only', filters=jobfilters.dump_preferences(jobfilters.parse(q('canada=1&sort=match&unknown=0'))))
+        self.assertEqual(only_region.status_code, 400)
+        self.assertFalse([p for p in self.store.presets() if p['name'] in ('Everything', 'Region only')])
 
     def test_no_send_route_exists_in_the_web_interface(self):
         self.assertEqual(self.client.post('/notifications/send', data={'csrf': self.csrf()}).status_code, 404)

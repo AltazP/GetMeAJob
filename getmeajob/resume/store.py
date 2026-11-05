@@ -15,7 +15,7 @@ class ProfileStore:
         self.path = directory / 'profiles.sqlite3'
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 4:
+            if version > 5:
                 raise ValueError('Private database is newer than this application.')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -65,6 +65,16 @@ class ProfileStore:
                         PRAGMA user_version=4; COMMIT;""")
                 except Exception:
                     db.rollback(); raise
+            if version < 5:
+                # Record of assisted form openings; the person submits, we only note what was filled.
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS applications(id INTEGER PRIMARY KEY,package_id INTEGER NOT NULL REFERENCES packages(id),
+                            job_id INTEGER NOT NULL,status TEXT NOT NULL,filled TEXT NOT NULL,needs TEXT NOT NULL,updated TEXT NOT NULL);
+                        CREATE INDEX IF NOT EXISTS applications_package ON applications(package_id);
+                        PRAGMA user_version=5; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
         os.chmod(self.path, 0o600)
 
     def connect(self):
@@ -81,6 +91,17 @@ class ProfileStore:
     def set_setting(self,key,value):
         with self.connect() as db:
             db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+
+    def add_application(self,package_id,job_id,status,filled=(),needs=()):
+        if status not in ('form_opened','applied_by_user'): raise ValueError('Invalid application status.')
+        with self.connect() as db:
+            return db.execute('INSERT INTO applications(package_id,job_id,status,filled,needs,updated) VALUES(?,?,?,?,?,?)',
+                (package_id,job_id,status,json.dumps(list(filled)),json.dumps(list(needs)),utc_now())).lastrowid
+
+    def applications(self,package_id):
+        with self.connect() as db:
+            rows=db.execute('SELECT * FROM applications WHERE package_id=? ORDER BY id DESC',(package_id,)).fetchall()
+        return [{**dict(r),'filled':json.loads(r['filled']),'needs':json.loads(r['needs'])} for r in rows]
 
     MAX_PRESETS=10
 

@@ -1,0 +1,6 @@
+<section><h2>Applicant details</h2>
+<p>The apply assistant fills only these details, exactly as you type them here. They stay in your private profile database on this Mac.</p>
+{% if error %}<p class="warning" role="alert">{{ error }}</p>{% endif %}{% if saved %}<p class="status verified">Saved.</p>{% endif %}
+<form method="post" action="/applicant"><input type="hidden" name="csrf" value="{{ csrf }}"><div class="field-grid">
+{% for key,label in [('first_name','First name'),('last_name','Last name'),('email','Email'),('phone','Phone'),('city','City'),('linkedin','LinkedIn URL (https://...)'),('website','Website or portfolio (https://...)')] %}<label>{{ label }}<input name="{{ key }}" value="{{ applicant.get(key,'') }}" maxlength="200" {% if key in ['first_name','last_name','email'] %}required{% endif %}></label>{% endfor %}
+</div><button>Save details</button></form></section>

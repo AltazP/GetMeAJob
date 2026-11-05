@@ -213,6 +213,17 @@ def query_string(filters: JobFilters, offset: int = 0) -> str:
     return urlencode(pairs)
 
 
+def is_narrow(filters: JobFilters) -> bool:
+    """True when the user chose something beyond the defaults (region, sort, unknown-details policy)."""
+    return bool(filters.q or filters.fields or filters.roles or filters.employment_types or filters.work_arrangements
+                or filters.experience_levels or filters.city or filters.province or filters.minimum_salary is not None
+                or filters.posted_days is not None or filters.companies or filters.minimum_score)
+
+
+NARROW_MESSAGE = ("Choose at least one filter first (job field, role words, type, level, location, salary, company, "
+                  "posting date or a minimum match) so alerts only contain jobs you asked for.")
+
+
 def centre(filters: JobFilters) -> Place | None:
     return find_centre(filters.city, filters.province) if filters.city else None
 

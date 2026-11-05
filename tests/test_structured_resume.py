@@ -117,7 +117,7 @@ class StructuredStoreTests(unittest.TestCase):
         result=match(job(),facts)
         self.assertIn('Fictional Labs',result['relevant_experience'][0])
         text,ids,_=letter(job(),facts)
-        self.assertIn('Built Python services that processed synthetic records using SQLite.',text)
+        self.assertIn('I built Python services that processed synthetic records using SQLite.',text)
         self.assertIn('Fictional Labs',text);self.assertNotIn('Example Tools',text)
         self.assertEqual(ids,[employment['id']])
     def test_verified_contact_details_are_not_qualification_evidence(self):

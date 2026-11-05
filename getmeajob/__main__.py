@@ -81,10 +81,16 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--force", action="store_true", help="Bypass board cache freshness, never rate limits")
             command.add_argument("--max-requests", type=int, help="Global request cap; 0 disables this cap")
             command.add_argument("--notify", action="store_true", help="After a successful search, email new matches for your saved presets")
+    assist_parser = commands.add_parser("assist", help="Open an approved application form in Chrome and fill the plain fields (never submits)")
+    assist_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+    assist_parser.add_argument("--package", type=int, required=True)
+    assist_parser.add_argument("--private", type=Path, default=Path("private"))
     commands.add_parser("serve", help="Start the authenticated local resume interface")
     employer_cli.configure(commands)
     from getmeajob import notify_cli
     notify_cli.configure(commands)
+    from getmeajob import schedule
+    schedule.configure(commands)
     args = parser.parse_args(argv)
     try:
         settings = load_settings(args.config)
@@ -101,6 +107,19 @@ def main(argv: list[str] | None = None) -> int:
             return employer_cli.run(args, settings)
         if args.command == "notify":
             return notify_cli.run(args, settings)
+        if args.command == "assist":
+            from getmeajob import apply_assist
+            from getmeajob.resume.store import ProfileStore
+            try:
+                report = apply_assist.assist(ProfileStore(args.private), args.package)
+            except ValueError as exc:
+                raise ConfigurationError(str(exc)) from None
+            print(f"Filled: {', '.join(report['filled']) or 'nothing'}. Still needs you: {', '.join(report['needs']) or 'nothing detected'}.")
+            return 0
+        if args.command == "schedule":
+            if args.schedule_action == "run":
+                return schedule.refresh(settings, notify_after=not args.no_notify)
+            return schedule.run(args, args.config)
         if args.command is None:
             print(f"GetMeAJob {__version__} — Phase 2 job discovery ready; Phase 2.5 employer registry and Phase 3 resume interface available.")
             print(f"Local dashboard address: http://{settings.host}:{settings.port} (not running).")

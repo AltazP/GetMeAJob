@@ -150,7 +150,7 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **146 passing tests, zero failures**. Original Phase 1/2/2.5 tests
+The full suite has **148 passing tests, zero failures**. Original Phase 1/2/2.5 tests
 are unchanged. Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
@@ -168,3 +168,15 @@ Phase 2.5 was pushed and tagged v0.2.5 at 078dca6; v0.2.0 remains unchanged.
 Phase 3 development commits remain local. v0.3.0 is a proposed release tag only,
 and must not be created or pushed before explicit approval. See PROJECT_STATE.md and
 PRODUCT_ROADMAP.md for current implementation/release state and future scope.
+
+
+### Password-form browser compatibility fix
+
+The response policy is `Referrer-Policy: same-origin`, not `no-referrer`. For ordinary
+form POSTs, no-referrer can serialize the Origin header as null, which the app correctly
+rejects. Same-origin preserves the local form origin while preventing referrer leakage
+to external origins. Setup/login have explicit query-free action URLs. Null, foreign,
+cross-site and wrong-port origins remain blocked, as do missing/invalid CSRF tokens.
+See the [Fetch Origin-header algorithm](https://fetch.spec.whatwg.org/#append-a-request-origin-header).
+After upgrading a running server, stop and restart it and use the newly printed setup
+link if a password has not yet been saved; previously loaded forms retain old headers.

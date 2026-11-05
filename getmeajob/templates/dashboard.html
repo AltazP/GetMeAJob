@@ -4,7 +4,7 @@
 <h1>{{ title }}</h1><p><small>Private on this Mac · All application documents require review · No submission or messaging</small></p>
 {% macro token() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
 {% if screen in ['login','setup'] %}
-<section>{% if screen=='login' and not configured %}<p>Use the one-time setup link printed when you start GetMeAJob. It protects initial password setup.</p>{% else %}<form method="post">{{ token() }}<label>Local password (at least 12 characters)<input name="password" type="password" minlength="12" maxlength="200" required autocomplete="{{ 'new-password' if screen=='setup' else 'current-password' }}"></label><button>{{ 'Save password' if screen=='setup' else 'Unlock' }}</button></form>{% endif %}</section>
+<section>{% if screen=='login' and not configured %}<p>Use the one-time setup link printed when you start GetMeAJob. It protects initial password setup.</p>{% else %}<form action="/{{ screen }}" method="post">{{ token() }}<label>Local password (at least 12 characters)<input name="password" type="password" minlength="12" maxlength="200" required autocomplete="{{ 'new-password' if screen=='setup' else 'current-password' }}"></label><button>{{ 'Save password' if screen=='setup' else 'Unlock' }}</button></form>{% endif %}</section>
 {% elif screen=='message' %}<section>{{ message }}</section>
 {% elif screen=='home' %}
 <section><h2>Add a resume version</h2><form action="/upload" method="post" enctype="multipart/form-data">{{ token() }}<label>Version label <input name="label" maxlength="120" placeholder="Software internship"></label><label>Text-based PDF or DOCX, up to 8 MiB <input name="resume" type="file" accept=".pdf,.docx" required></label><button>Upload and preview</button></form></section>

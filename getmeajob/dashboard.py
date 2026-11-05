@@ -81,7 +81,8 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         session['expires']=now+3600
         response.set_cookie('gmj_session',cookie,httponly=True,samesite='strict',max_age=3600,path='/')
         response.headers.update({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
-            'Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+            # no-referrer can turn ordinary form POST origins into null in browsers.
+            'Referrer-Policy':'same-origin','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
         return response
 
     @app.get('/setup')

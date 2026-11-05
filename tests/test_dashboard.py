@@ -33,6 +33,37 @@ class DashboardTests(unittest.TestCase):
         result=self.client.post('/login',data={'csrf':token,'password':'Synthetic-test-password!'},follow_redirects=False)
         self.assertEqual(result.status_code,303,result.text)
         self.assertNotEqual(old,self.client.cookies.get('gmj_session'))
+    def test_password_forms_preserve_browser_origin_and_strip_setup_query(self):
+        response=self.client.get('/setup?token='+self.app.state.bootstrap)
+        self.assertEqual(response.headers['referrer-policy'],'same-origin')
+        self.assertIn('action="/setup" method="post"',response.text)
+        csrf=re.search(r'name="csrf" value="([^"]+)"',response.text)[1]
+        result=self.client.post('/setup',headers={'Origin':'http://127.0.0.1:8000','Sec-Fetch-Site':'same-origin'},
+            data={'csrf':csrf,'password':'Synthetic-browser-password!'},follow_redirects=False)
+        self.assertEqual(result.status_code,303,result.text)
+        response=self.client.get('/login')
+        self.assertEqual(response.headers['referrer-policy'],'same-origin')
+        self.assertIn('action="/login" method="post"',response.text)
+        csrf=re.search(r'name="csrf" value="([^"]+)"',response.text)[1]
+        result=self.client.post('/login',headers={'Origin':'http://127.0.0.1:8000','Sec-Fetch-Site':'same-origin'},
+            data={'csrf':csrf,'password':'Synthetic-browser-password!'},follow_redirects=False)
+        self.assertEqual(result.status_code,303,result.text)
+
+    def test_opaque_and_cross_site_origins_still_rejected_even_with_csrf(self):
+        csrf=self.csrf('/setup?token='+self.app.state.bootstrap)
+        for origin in ['null','https://evil.example','http://localhost:8000','http://127.0.0.1:8001']:
+            with self.subTest(origin=origin):
+                response=self.client.post('/setup',headers={'Origin':origin},
+                    data={'csrf':csrf,'password':'Synthetic-browser-password!'})
+                self.assertEqual(response.status_code,403)
+        self.assertIsNone(self.app.state.store.get_setting('password'))
+        response=self.client.post('/setup',headers={'Origin':'http://127.0.0.1:8000','Sec-Fetch-Site':'cross-site'},
+            data={'csrf':csrf,'password':'Synthetic-browser-password!'})
+        self.assertEqual(response.status_code,403)
+        response=self.client.post('/setup',headers={'Origin':'http://127.0.0.1:8000'},
+            data={'csrf':'bad','password':'Synthetic-browser-password!'})
+        self.assertEqual(response.status_code,403)
+
     def test_authentication_csrf_host_origin(self):
         self.assertEqual(self.client.get('/',follow_redirects=False).status_code,303)
         self.assertEqual(self.client.get('/setup?token=invalid').status_code,403)

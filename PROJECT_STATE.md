@@ -10,7 +10,7 @@ verified-fact cover letters, optional constrained existing-local-model ordering,
 versioned editable packages, TXT/DOCX/PDF/ZIP downloads and authenticated loopback-only
 FastAPI/Jinja2 interface. No external application actions are implemented.
 
-Latest complete test run: 146 passed, 0 failed (November 5, 2026). The original 131
+Latest complete test run: 148 passed, 0 failed (November 5, 2026). The original 131
 tests are unchanged. Synthetic fixtures only; setup layout and PDF export visually
 checked. One test-only HTTPX deprecation warning remains; no runtime failure.
 
@@ -22,6 +22,9 @@ run `git log -1 --oneline`; a file cannot contain its own future commit hash.
 Published: Phase 2.5 main and annotated v0.2.5 both point to
 078dca6cbea48e0f888d8529cd6d30e9acf91ab6. Existing v0.2.0 unchanged. No Phase 3
 commits have been pushed and v0.3.0 has not been created.
+
+Latest fix: password forms use same-origin referrer policy and explicit actions;
+legitimate browser POSTs work while opaque/foreign origins and bad CSRF are rejected.
 
 Known limits: heuristic section extraction and vocabulary-based relevance, no OCR,
 no comprehensive eligibility/experience-duration verification, standard-font PDF

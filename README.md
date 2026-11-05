@@ -255,7 +255,7 @@ errors; verification is never disabled.
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The 146 offline automated tests cover configuration, normalization, filtering,
+The 148 offline automated tests cover configuration, normalization, filtering,
 locations, SQLite persistence and timestamps, deduplication, source isolation,
 pagination, HTTP failures and rate limits, TLS verification, terminal safety and CLI
 behavior. Tests use synthetic data and no accounts or network access.

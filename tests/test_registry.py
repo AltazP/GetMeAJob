@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from getmeajob.migrations import migrate
+from getmeajob.migrations import VERSION, migrate
 from getmeajob.registry import Registry
 from getmeajob.sources import SourceError
 from getmeajob.storage import JobStore
@@ -175,7 +175,7 @@ class MigrationTests(unittest.TestCase):
                     self.assertEqual(migrated.count(), 1)
                     self.assertEqual(migrated.job_id(job()), identity)
                     self.assertEqual(migrated.connection.execute("SELECT payload FROM observations").fetchone()[0], payload)
-                    self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 1)
+                    self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], VERSION)
                     self.assertEqual(migrated.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
     def test_future_schema_refused(self):

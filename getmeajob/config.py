@@ -8,7 +8,8 @@ import tomllib
 
 from getmeajob.filters import SearchFilters
 from getmeajob.locations import DEFAULT_PLACES, Place, resolve
-from getmeajob.sources import Board
+from getmeajob.sources import Board, SourceError
+from getmeajob.urls import public_url, PROVIDERS
 
 
 class ConfigurationError(ValueError):
@@ -16,10 +17,27 @@ class ConfigurationError(ValueError):
 
 
 @dataclass(frozen=True)
+class DiscoverySettings:
+    hn_enabled: bool = True
+    hn_story_id: int | None = None
+    max_items: int = 20
+    page_hosts: tuple[str, ...] = ()
+    refresh_minutes: float = 60
+    verification_hours: float = 24
+    max_requests: int | None = 100
+    per_host_requests: int = 50
+    per_source_requests: int = 20
+    timeout_seconds: float = 20
+    include_compensation: bool = True
+    disabled_providers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     search: SearchFilters = field(default_factory=SearchFilters)
+    discovery: DiscoverySettings = field(default_factory=DiscoverySettings)
     boards: tuple[Board, ...] = ()
     places: tuple[Place, ...] = DEFAULT_PLACES
     database: Path = Path("data/jobs.sqlite3")
@@ -65,7 +83,7 @@ def load_settings(path: Path | None = None) -> Settings:
             document = tomllib.load(stream)
     except (OSError, ValueError) as exc:
         raise ConfigurationError("Cannot read configuration; check the file and TOML syntax.") from exc
-    _table(document, "configuration", {"dashboard", "search", "boards", "locations", "storage", "network"})
+    _table(document, "configuration", {"dashboard", "search", "boards", "locations", "storage", "network", "discovery"})
     dashboard = _table(document.get("dashboard", {}), "dashboard", {"host", "port"})
     storage = _table(document.get("storage", {}), "storage", {"database"})
     network = _table(document.get("network", {}), "network", {"request_interval_seconds"})
@@ -141,5 +159,31 @@ def load_settings(path: Path | None = None) -> Settings:
         boards.append(Board(source, token, employer, industry, region))
     if len({(board.source, board.region, board.token) for board in boards}) != len(boards):
         raise ConfigurationError("Duplicate employer boards in configuration.")
-    return Settings(**dashboard, search=search, boards=tuple(boards), places=tuple(places),
+    options = dict(_table(document.get("discovery", {}), "discovery", {item.name for item in fields(DiscoverySettings)}))
+    for key in ("hn_enabled", "include_compensation"):
+        if key in options and type(options[key]) is not bool:
+            raise ConfigurationError(f"discovery.{key} must be true or false.")
+    for key in ("hn_story_id", "max_items", "max_requests", "per_host_requests", "per_source_requests"):
+        if key in options and (type(options[key]) is not int or not (0 if key == "max_requests" else 1) <= options[key] <= 100000):
+            raise ConfigurationError(f"discovery.{key} must be a bounded positive integer (max_requests=0 disables the global cap).")
+    if options.get("max_requests") == 0:
+        options["max_requests"] = None
+    for key, maximum in (("refresh_minutes", 10080), ("verification_hours", 720), ("timeout_seconds", 60)):
+        if key in options:
+            options[key] = _number(options[key], f"discovery.{key}", 1, maximum)
+    for key in ("page_hosts", "disabled_providers"):
+        if key in options:
+            values = options[key]
+            if not isinstance(values, list) or any(not isinstance(item, str) or not item.strip() for item in values):
+                raise ConfigurationError(f"discovery.{key} must be an array of nonempty strings.")
+            options[key] = tuple(values)
+    if set(options.get("disabled_providers", ())) - PROVIDERS:
+        raise ConfigurationError("discovery.disabled_providers must contain supported provider names.")
+    try:
+        for host in options.get("page_hosts", ()):
+            if public_url("https://" + host) != "https://" + host + "/":
+                raise SourceError("Use exact lowercase hostnames only.")
+    except SourceError as exc:
+        raise ConfigurationError("discovery.page_hosts must contain public HTTPS hostnames without paths or ports.") from exc
+    return Settings(**dashboard, search=search, discovery=DiscoverySettings(**options), boards=tuple(boards), places=tuple(places),
                     database=database, request_interval_seconds=interval)

@@ -41,6 +41,9 @@ class AshbyTests(unittest.TestCase):
         with self.assertRaises(SourceError):
             AshbySource.normalize(row(isListed=False), BOARD)
 
+    def test_malformed_optional_workplace_metadata_stays_unknown(self):
+        self.assertIsNone(AshbySource.normalize(row(workplaceType=[]), BOARD).work_arrangement)
+
     def test_optional_compensation_can_be_disabled(self):
         client = FakeClient({"jobs": []})
         self.assertEqual(AshbySource(client, include_compensation=False).fetch(BOARD), [])

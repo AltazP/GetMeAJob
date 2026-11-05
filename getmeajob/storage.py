@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from getmeajob.locations import normalized
 from getmeajob.models import Job, utc_now
-from getmeajob.migrations import migrate
+from getmeajob.migrations import VERSION, migrate
 
 
 def canonical_url(url: str) -> str:
@@ -37,6 +37,9 @@ class JobStore:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path)
+        if self.connection.execute("PRAGMA user_version").fetchone()[0] > VERSION:
+            self.connection.close()
+            raise sqlite3.DatabaseError("Database schema is newer than this application; refusing to downgrade.")
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript("""
@@ -81,6 +84,8 @@ class JobStore:
                 "SELECT * FROM observations WHERE source=? AND board=? AND source_id=?",
                 (job.source, job.board, job.source_id),
             ).fetchone()
+            if previous and now < previous["last_checked"]:
+                return previous["job_id"]
             ids = {row[0] for key in keys for row in connection.execute("SELECT job_id FROM identities WHERE key=?", (key,))}
             if previous:
                 ids.add(previous["job_id"])
@@ -95,7 +100,7 @@ class JobStore:
                     connection.execute("UPDATE identities SET job_id=? WHERE job_id=?", (job_id, other))
                     connection.execute("UPDATE observations SET job_id=? WHERE job_id=?", (job_id, other))
                     connection.execute("DELETE FROM jobs WHERE id=?", (other,))
-                connection.execute("UPDATE jobs SET last_checked=? WHERE id=?", (now, job_id))
+                connection.execute("UPDATE jobs SET last_checked=MAX(last_checked,?) WHERE id=?", (now, job_id))
                 if previous is None or previous["payload"] != payload:
                     connection.execute("UPDATE jobs SET last_updated=? WHERE id=?", (now, job_id))
             else:

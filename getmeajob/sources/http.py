@@ -1,15 +1,24 @@
-"""Bounded, paced HTTPS GETs with no redirects or protection bypasses."""
+"""Paced, bounded public GET requests with persistent host pauses and request budgets."""
 
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from http.client import HTTPException
 import json
+import math
 from pathlib import Path
 import ssl
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request
 
+from getmeajob.network import SafeOpener
 from getmeajob.sources import SourceError
+from getmeajob.urls import public_url
+
+
+class BudgetExceeded(SourceError):
+    """A run reached a configured limit; this is not a broken source."""
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -18,7 +27,6 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def tls_context() -> ssl.SSLContext:
-    """Keep verification on; python.org macOS installs may lack their own CA bundle."""
     context = ssl.create_default_context()
     defaults = ssl.get_default_verify_paths()
     if defaults.cafile is None and defaults.capath is None and Path("/etc/ssl/cert.pem").is_file():
@@ -26,61 +34,105 @@ def tls_context() -> ssl.SSLContext:
     return context
 
 
+def retry_seconds(value: str | None, default: float = 3600) -> float:
+    if value:
+        try:
+            seconds = float(value)
+            if math.isfinite(seconds):
+                return max(1, seconds)
+        except ValueError:
+            try:
+                parsed = parsedate_to_datetime(value)
+                return max(1, (parsed - datetime.now(timezone.utc)).total_seconds())
+            except (ValueError, TypeError):
+                pass
+    return default
+
+
 class JsonClient:
-    HOSTS = {"boards-api.greenhouse.io", "api.lever.co", "api.eu.lever.co", "api.ashbyhq.com"}
+    HOSTS = {"boards-api.greenhouse.io", "api.lever.co", "api.eu.lever.co", "api.ashbyhq.com", "hacker-news.firebaseio.com"}
     MAX_BYTES = 20 * 1024 * 1024
 
     def __init__(self, interval: float = 1.0, timeout: float = 20.0,
-                 opener=None, sleep=time.sleep, clock=time.monotonic):
-        self.interval = max(1.0, interval)
-        self.timeout = timeout
-        self.opener = opener or build_opener(NoRedirect(), HTTPSHandler(context=tls_context()))
+                 opener=None, sleep=time.sleep, clock=time.monotonic,
+                 max_requests: int | None = None, per_host_limit: int | None = None,
+                 per_source_limit: int | None = None, state=None, offline: bool = False, memoize: bool = False):
+        self.interval, self.timeout = max(1.0, interval), timeout
+        self.opener = opener or SafeOpener(tls_context())
         self.sleep, self.clock = sleep, clock
         self.last_request: dict[str, float] = {}
         self.blocked_hosts: set[str] = set()
+        self.max_requests, self.per_host_limit, self.per_source_limit = max_requests, per_host_limit, per_source_limit
+        self.requests, self.host_counts, self.source_counts = 0, {}, {}
+        self.source = "default"
+        self.state, self.offline = state, offline
+        self.memo, self.memoize = {}, memoize
 
-    def get(self, url: str):
-        parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.netloc not in self.HOSTS:
-            raise SourceError("Only supported public HTTPS API hosts are permitted.")
-        host = parsed.netloc
-        if host in self.blocked_hosts:
-            raise SourceError("Host paused for this search after rate limiting or access denial.")
+    def _budget(self, host):
+        if self.offline:
+            raise BudgetExceeded("Offline mode prohibits network requests.")
+        if ((self.max_requests is not None and self.requests >= self.max_requests)
+            or (self.per_host_limit is not None and self.host_counts.get(host, 0) >= self.per_host_limit)
+            or (self.per_source_limit is not None and self.source_counts.get(self.source, 0) >= self.per_source_limit)):
+            raise BudgetExceeded("Configured request budget reached; remaining work is deferred.")
+        self.requests += 1
+        self.host_counts[host] = self.host_counts.get(host, 0) + 1
+        self.source_counts[self.source] = self.source_counts.get(self.source, 0) + 1
+
+    def _pause(self, host, seconds):
+        self.blocked_hosts.add(host)
+        if self.state:
+            self.state.pause(host, seconds)
+
+    def read(self, url: str, *, page_hosts: tuple[str, ...] = (), max_bytes: int | None = None) -> bytes:
+        url = public_url(url)
+        host = urlsplit(url).hostname
+        if host not in self.HOSTS | set(page_hosts):
+            raise SourceError("Only supported public HTTPS API hosts or explicitly permitted page hosts are allowed.")
+        if host in self.blocked_hosts or (self.state and self.state.paused(host)):
+            raise SourceError("Host paused after rate limiting or access denial; retry after the persisted pause.")
+        limit = max_bytes or self.MAX_BYTES
         for attempt in range(3):
+            self._budget(host)
             wait = self.interval - (self.clock() - self.last_request.get(host, float("-inf")))
             if wait > 0:
                 self.sleep(wait)
             self.last_request[host] = self.clock()
-            request = Request(url, headers={"Accept": "application/json", "User-Agent": "GetMeAJob/0.2 (public job discovery)"})
+            request = Request(url, headers={"Accept": "text/html,text/plain" if page_hosts else "application/json",
+                                           "User-Agent": "GetMeAJob/0.2.5 (public career source discovery)"})
             try:
                 with self.opener.open(request, timeout=self.timeout) as response:
-                    raw = response.read(self.MAX_BYTES + 1)
-                if len(raw) > self.MAX_BYTES:
-                    raise SourceError("API response exceeded the safe size limit.")
-                return json.loads(raw)
+                    raw = response.read(limit + 1)
+                if len(raw) > limit:
+                    raise SourceError("API/page response exceeded the safe size limit.")
+                return raw
             except HTTPError as exc:
-                if exc.code in (401, 403, 429):
-                    # No retries on access denial or throttling, including other boards on this host.
-                    self.blocked_hosts.add(host)
-                    retry = exc.headers.get("Retry-After", "not provided") if exc.headers else "not provided"
-                    if exc.code == 429:
-                        raise SourceError(f"HTTP 429: host paused; Retry-After: {retry}. Retry later.") from exc
-                    raise SourceError(f"HTTP {exc.code}: access denied; host paused.") from exc
-                if exc.code == 503 and exc.headers and exc.headers.get("Retry-After"):
-                    self.blocked_hosts.add(host)
-                    raise SourceError("HTTP 503: server requested a pause; retry after " + exc.headers["Retry-After"] + ".") from exc
+                retry = exc.headers.get("Retry-After") if exc.headers else None
+                if exc.code in (401, 403, 429) or (retry and exc.code >= 500):
+                    self._pause(host, retry_seconds(retry, 86400 if exc.code in (401, 403) else 3600))
+                    raise SourceError(f"HTTP {exc.code}: host paused; Retry-After: {retry or 'not provided'}. Retry later.") from exc
                 if exc.code in (500, 502, 503, 504) and attempt < 2:
                     self.sleep(2 ** (attempt + 1))
                     continue
-                raise SourceError(f"HTTP {exc.code}: board request failed (check token and region).") from exc
+                raise SourceError(f"HTTP {exc.code}: request failed (check board, region or public access).") from exc
             except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 reason = exc.reason if isinstance(exc, URLError) else exc
                 if isinstance(reason, ssl.SSLCertVerificationError):
-                    raise SourceError("TLS certificate verification failed. Check your Python/system CA certificates; verification has not been disabled.") from exc
+                    raise SourceError("TLS certificate verification failed. Check Python/system CA certificates; verification remains enabled.") from exc
                 if attempt < 2:
                     self.sleep(2 ** (attempt + 1))
                     continue
                 raise SourceError("Network request failed after three attempts; check connectivity and TLS certificates.") from exc
-            except (ValueError, UnicodeError, RecursionError) as exc:
-                raise SourceError("API returned invalid JSON; no content was executed.") from exc
         raise SourceError("Request failed.")
+
+    def get(self, url: str):
+        if self.memoize and url in self.memo:
+            return self.memo[url]
+        raw = self.read(url)
+        try:
+            result = json.loads(raw)
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise SourceError("API returned invalid JSON; no content was executed.") from exc
+        if self.memoize:
+            self.memo[url] = result
+        return result

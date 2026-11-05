@@ -57,3 +57,6 @@ storage_state*.json
 .DS_Store
 .idea/
 .vscode/
+
+# Only the reviewed public employer example may be committed; personal CSV imports stay ignored.
+!examples/employers.example.csv

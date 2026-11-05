@@ -69,6 +69,6 @@ class AshbySource:
             department=plain(row.get("department")) or None, compensation=compensation, salary=salary,
             employment_type=employment(row.get("employmentType"), title),
             # isRemote=true can mean hybrid; only workplaceType resolves that ambiguity.
-            work_arrangement={"Remote": "remote", "Hybrid": "hybrid", "OnSite": "on-site"}.get(row.get("workplaceType")),
+            work_arrangement={"Remote": "remote", "Hybrid": "hybrid", "OnSite": "on-site"}.get(row.get("workplaceType")) if isinstance(row.get("workplaceType"), str) else None,
             posted_at=timestamp(row.get("publishedAt")), industry=board.industry,
             experience_level=level, minimum_experience_years=years, experience_evidence=evidence)

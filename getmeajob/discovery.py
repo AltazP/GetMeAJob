@@ -27,11 +27,14 @@ class SearchReport:
     successful_boards: int
     errors: tuple[str, ...]
     stored_jobs: int
+    requests: int | None = None
+    cached_sources: int = 0
+    mode: str = "live"
 
 
-def save_and_filter(jobs: list[Job], settings: Settings, store: JobStore) -> tuple[Result, ...]:
+def save_and_filter(jobs: list[Job], settings: Settings, store: JobStore, checked_at: dict | None = None) -> tuple[Result, ...]:
     for job in jobs:
-        store.upsert(job)
+        store.upsert(job, now=(checked_at or {}).get((job.source, job.board, job.source_id)))
     matches = {}
     for job in jobs:
         match = evaluate(job, settings.search, settings.places)
@@ -52,6 +55,9 @@ def search(settings: Settings, store: JobStore, adapters=None, progress=None) ->
     for board in settings.boards:
         if progress:
             progress(f"Checking {board.employer} ({board.source}/{board.token})...")
+        client = getattr(adapters[board.source], "client", None)
+        if client is not None and hasattr(client, "source"):
+            client.source = f"{board.source}:{board.region}:{board.token}"
         try:
             found = adapters[board.source].fetch(board)
         except SourceError as exc:

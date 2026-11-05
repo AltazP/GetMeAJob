@@ -2,7 +2,7 @@
 
 import sqlite3
 
-VERSION = 1
+VERSION = 2
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -10,6 +10,13 @@ def migrate(connection: sqlite3.Connection) -> None:
     if version > VERSION:
         raise sqlite3.DatabaseError("Database schema is newer than this application; refusing to downgrade.")
     if version == VERSION:
+        return
+    if version == 1:
+        try:
+            connection.executescript("BEGIN IMMEDIATE; CREATE TABLE source_cache(source_id INTEGER PRIMARY KEY REFERENCES career_sources(id), payload TEXT NOT NULL, fetched_at TEXT NOT NULL); PRAGMA user_version=2; COMMIT;")
+        except Exception:
+            connection.rollback()
+            raise
         return
     # Explicit transaction: executescript's implicit commit must not split the migration.
     try:
@@ -48,7 +55,8 @@ def migrate(connection: sqlite3.Connection) -> None:
                 successful_sources INTEGER NOT NULL
             );
             CREATE INDEX career_sources_employer ON career_sources(employer_id);
-            PRAGMA user_version = 1;
+            CREATE TABLE source_cache(source_id INTEGER PRIMARY KEY REFERENCES career_sources(id), payload TEXT NOT NULL, fetched_at TEXT NOT NULL);
+            PRAGMA user_version = 2;
             COMMIT;
         """)
     except Exception:

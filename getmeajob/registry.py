@@ -64,6 +64,9 @@ class Registry:
                 self.db.execute("INSERT OR IGNORE INTO source_evidence VALUES(?,?,?)", (source_id, method, evidence))
         return source_id
 
+    def source_count(self) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM career_sources").fetchone()[0]
+
     def rows(self) -> list[dict]:
         return [dict(row) for row in self.db.execute("""SELECT s.*,e.canonical_name,e.official_website,
             e.enabled AS employer_enabled,COALESCE(p.enabled,1) AS provider_enabled
@@ -126,10 +129,13 @@ class Registry:
             allowed = {"name", "website", "careers_url", "ats_url"}
             if not reader.fieldnames or "name" not in reader.fieldnames or set(reader.fieldnames) - allowed or len(set(reader.fieldnames)) != len(reader.fieldnames):
                 raise SourceError("CSV columns must be name, website, careers_url, ats_url (name required).")
-            rows = list(reader)
+            try:
+                rows = list(reader)
+            except csv.Error as exc:
+                raise SourceError("CSV could not be parsed safely.") from exc
         if len(rows) > 10000:
             raise SourceError("CSV exceeds 10,000 employer rows.")
-        # Dry validation in a transaction on an in-memory snapshot also guarantees atomic import.
+        # Validate every row on a snapshot before writing anything to the live registry.
         from getmeajob.storage import JobStore
         with JobStore(Path(":memory:")) as preview:
             self.db.backup(preview.connection)
@@ -145,3 +151,60 @@ class Registry:
         for row in rows:
             self.add(**{key: value.strip() or None for key, value in row.items()}, method="csv")
         return len(rows)
+
+    def paused(self, host: str) -> bool:
+        row = self.db.execute("SELECT until_time FROM host_pauses WHERE host=?", (host,)).fetchone()
+        return row is not None and datetime.fromisoformat(row[0]) > datetime.now(timezone.utc)
+
+    def pause(self, host: str, seconds: float) -> None:
+        try:
+            until = after(seconds)
+        except OverflowError:
+            until = datetime.max.replace(tzinfo=timezone.utc).isoformat()
+        with self.db:
+            self.db.execute("INSERT INTO host_pauses VALUES(?,?) ON CONFLICT(host) DO UPDATE SET until_time=MAX(until_time,excluded.until_time)", (host, until))
+
+    def cache(self, source_id: int, jobs: list, fetched_at: str | None = None) -> None:
+        import json
+        with self.db:
+            self.db.execute("INSERT INTO source_cache VALUES(?,?,?) ON CONFLICT(source_id) DO UPDATE SET payload=excluded.payload,fetched_at=excluded.fetched_at",
+                            (source_id, json.dumps([job.to_dict() for job in jobs], ensure_ascii=True), fetched_at or utc_now()))
+
+    def cached(self, source_id: int, minutes: float | None = 60):
+        import json
+        from getmeajob.models import Job
+        row = self.db.execute("SELECT payload,fetched_at FROM source_cache WHERE source_id=?", (source_id,)).fetchone()
+        if row is None or (minutes is not None and elapsed(row[1], minutes * 60)):
+            return None
+        return [Job.from_dict(item) for item in json.loads(row[0])], row[1]
+
+    def seen(self, key: str, seconds: float | None = None) -> bool:
+        row = self.db.execute("SELECT checked_at FROM discovery_items WHERE key=?", (key,)).fetchone()
+        return row is not None and (seconds is None or not elapsed(row[0], seconds))
+
+    def mark_seen(self, key: str) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO discovery_items VALUES(?,?) ON CONFLICT(key) DO UPDATE SET checked_at=excluded.checked_at", (key, utc_now()))
+
+    def coverage(self, verification_hours: float = 24) -> dict:
+        rows = self.rows()
+        enabled = [row for row in rows if self.enabled(row)]
+        eligible = self.eligible(verification_hours)
+        last = self.db.execute("SELECT * FROM refresh_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return {
+            "metrics": "Observed local database counts; not estimates of all employers or vacancies",
+            "total_known_employers": self.db.execute("SELECT COUNT(*) FROM employers").fetchone()[0],
+            "verified_employers": len({row["employer_id"] for row in eligible}),
+            "active_employer_boards": sum(row["status"] == "ACTIVE" for row in eligible),
+            "verified_enabled_boards": len(eligible),
+            "stale_sources": sum(row["status"] in {"VERIFIED", "ACTIVE"} and elapsed(row["last_verified"], verification_hours * 3600) for row in enabled),
+            "supported_providers": sorted(PROVIDERS),
+            "jobs_collected_per_provider": {row[0]: row[1] for row in self.db.execute("SELECT source,COUNT(DISTINCT job_id) FROM observations GROUP BY source")},
+            "unique_jobs_stored": self.store.count(),
+            "failed_sources": sum(row["status"] == "TEMPORARILY_UNAVAILABLE" for row in rows),
+            "unsupported_sources": sum(row["status"] == "UNSUPPORTED" or row["provider"] not in PROVIDERS for row in rows),
+            "disabled_sources": sum(not self.enabled(row) for row in rows),
+            "last_successful_refresh": self.db.execute("SELECT MAX(last_successful_fetch) FROM career_sources").fetchone()[0],
+            "last_run": dict(last) if last else None,
+            "new_jobs_last_run": last["new_jobs"] if last else 0,
+        }

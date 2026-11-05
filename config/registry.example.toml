@@ -1,0 +1,51 @@
+# Phase 2.5: public API discovery + registry-backed searches. No API keys needed.
+[storage]
+database = "data/jobs.sqlite3"
+
+[network]
+request_interval_seconds = 1.0
+
+[search]
+city = "Waterloo, Ontario"
+latitude = 43.4643
+longitude = -80.5204
+radius_km = 100
+include_unknown = false
+
+[discovery]
+# Official HN public API finds the latest Who is hiring thread automatically.
+hn_enabled = true
+# Optional known official thread ID, otherwise detected from whoishiring's submissions:
+# hn_story_id = 12345678
+max_items = 10
+# Only add exact career-page hosts whose public access/terms you have checked.
+# This setting grants page-fetch permission; DNS/public-IP and robots checks still apply.
+page_hosts = []
+# Successful endpoint snapshots prevent immediate duplicate board downloads.
+refresh_minutes = 60
+verification_hours = 24
+# Includes retries, API calls and robots/page requests. 0 disables only the global cap.
+max_requests = 50
+per_host_requests = 30
+per_source_requests = 20
+timeout_seconds = 20
+include_compensation = true
+# Additional provider exclusions; persistent CLI provider controls also apply.
+disabled_providers = []
+
+# Optional initial boards. Discover records these as CANDIDATE, never auto-verifies.
+# Remove these blocks to grow solely through the public hiring feed and imported pages.
+[[boards]]
+source = "greenhouse"
+token = "stripe"
+employer = "Stripe"
+
+[[boards]]
+source = "lever"
+token = "palantir"
+employer = "Palantir Technologies"
+
+[[boards]]
+source = "ashby"
+token = "Ashby"
+employer = "Ashby"

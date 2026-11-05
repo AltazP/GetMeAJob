@@ -56,6 +56,9 @@ class Job:
     experience_level: str | None = None
     minimum_experience_years: float | None = None
     experience_evidence: str | None = None
+    department: str | None = None
+    original_url: str | None = None
+    compensation: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -6,6 +6,7 @@ from getmeajob.config import Settings
 from getmeajob.filters import Match, evaluate
 from getmeajob.models import Job
 from getmeajob.sources import SourceError
+from getmeajob.sources.ashby import AshbySource
 from getmeajob.sources.greenhouse import GreenhouseSource
 from getmeajob.sources.http import JsonClient
 from getmeajob.sources.lever import LeverSource
@@ -45,7 +46,7 @@ def save_and_filter(jobs: list[Job], settings: Settings, store: JobStore) -> tup
 def search(settings: Settings, store: JobStore, adapters=None, progress=None) -> SearchReport:
     if adapters is None:
         client = JsonClient(interval=settings.request_interval_seconds)
-        adapters = {"greenhouse": GreenhouseSource(client), "lever": LeverSource(client)}
+        adapters = {"greenhouse": GreenhouseSource(client), "lever": LeverSource(client), "ashby": AshbySource(client)}
     jobs, errors = [], []
     successful = 0
     for board in settings.boards:

@@ -23,6 +23,8 @@ def canonical_url(url: str) -> str:
 
 def identity_keys(job: Job) -> list[str]:
     keys = ["url:" + canonical_url(job.application_url)]
+    if job.original_url:
+        keys.append("url:" + canonical_url(job.original_url))
     # Exact content identity only; equal titles alone can be different requisitions.
     if job.description.strip() and job.locations:
         content = [normalized(job.employer), normalized(job.role),

@@ -27,7 +27,7 @@ def tls_context() -> ssl.SSLContext:
 
 
 class JsonClient:
-    HOSTS = {"boards-api.greenhouse.io", "api.lever.co", "api.eu.lever.co"}
+    HOSTS = {"boards-api.greenhouse.io", "api.lever.co", "api.eu.lever.co", "api.ashbyhq.com"}
     MAX_BYTES = 20 * 1024 * 1024
 
     def __init__(self, interval: float = 1.0, timeout: float = 20.0,

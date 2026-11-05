@@ -133,9 +133,9 @@ def load_settings(path: Path | None = None) -> Settings:
         token = _string(row.get("token"), "boards.token")
         employer = _string(row.get("employer"), "boards.employer")
         region = row.get("region", "global")
-        if source not in {"greenhouse", "lever"} or not re.fullmatch(r"[A-Za-z0-9_-]{1,150}", token):
-            raise ConfigurationError("Use greenhouse or lever and a board token, not a URL.")
-        if region not in ("global", "eu") or (source == "greenhouse" and region != "global"):
+        if source not in {"greenhouse", "lever", "ashby"} or not re.fullmatch(r"[A-Za-z0-9_-]{1,150}", token):
+            raise ConfigurationError("Use greenhouse, lever or ashby and a board token, not a URL.")
+        if region not in ("global", "eu") or (source != "lever" and region != "global"):
             raise ConfigurationError("Only Lever supports region = eu.")
         industry = _string(row["industry"], "boards.industry") if "industry" in row else None
         boards.append(Board(source, token, employer, industry, region))

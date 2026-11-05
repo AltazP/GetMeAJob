@@ -24,6 +24,9 @@ def export(text,kind):
         content=[]
         for paragraph in text.split('\n\n'):
             content.extend([Paragraph(escape(paragraph).replace('\n','<br/>'),styles['Normal']),Spacer(1,12)])
-        SimpleDocTemplate(stream,pagesize=LETTER,topMargin=54,bottomMargin=54).build(content)
+        def paper(canvas,document):
+            canvas.saveState(); canvas.setFillColorRGB(1,1,1)
+            canvas.rect(0,0,LETTER[0],LETTER[1],fill=1,stroke=0); canvas.restoreState()
+        SimpleDocTemplate(stream,pagesize=LETTER,topMargin=54,bottomMargin=54).build(content,onFirstPage=paper,onLaterPages=paper)
         return stream.getvalue(),'application/pdf'
     raise ValueError('Unsupported export format.')

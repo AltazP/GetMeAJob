@@ -80,10 +80,15 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--dry-run", action="store_true", help="Preview sources without network or writes")
             command.add_argument("--force", action="store_true", help="Bypass board cache freshness, never rate limits")
             command.add_argument("--max-requests", type=int, help="Global request cap; 0 disables this cap")
+    commands.add_parser("serve", help="Start the authenticated local resume interface")
     employer_cli.configure(commands)
     args = parser.parse_args(argv)
     try:
         settings = load_settings(args.config)
+        if args.command == "serve":
+            from getmeajob.dashboard import serve
+            serve(settings)
+            return 0
         max_requests = getattr(args, "max_requests", None)
         if max_requests is not None:
             if not 0 <= max_requests <= 100000:

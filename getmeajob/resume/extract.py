@@ -1,6 +1,7 @@
 """Bounded document extraction in a disposable, resource-limited subprocess."""
 import io
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -23,9 +24,9 @@ def validate(filename,data):
                     raise ValueError('DOCX exceeds safe expanded size.')
                 if 'word/document.xml' not in archive.namelist(): raise ValueError('Invalid DOCX.')
                 for item in members:
-                    if '..' in Path(item.filename).parts or item.filename.startswith('/') or item.flag_bits & 1 or item.filename.endswith('vbaProject.bin'):
+                    if '..' in Path(item.filename).parts or item.filename.startswith('/') or item.flag_bits & 1 or item.filename.casefold().endswith('vbaproject.bin'):
                         raise ValueError('Unsafe DOCX member.')
-                    if item.filename.endswith('.rels') and b'TargetMode="External"' in archive.read(item):
+                    if item.filename.endswith('.rels') and re.search(br'TargetMode\s*=\s*["\']External["\']',archive.read(item),re.I):
                         raise ValueError('DOCX external relationships are not accepted. Save a copy without external links.')
         except (zipfile.BadZipFile,RuntimeError) as exc: raise ValueError('Invalid DOCX archive.') from exc
     return suffix

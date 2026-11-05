@@ -60,3 +60,4 @@ storage_state*.json
 
 # Only the reviewed public employer example may be committed; personal CSV imports stay ignored.
 !examples/employers.example.csv
+!examples/employers.starter.csv

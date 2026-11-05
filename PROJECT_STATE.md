@@ -15,7 +15,7 @@ and preview-confirm reprocessing into a new all-pending resume version. Existing
 resumes, verified facts, packages and jobs remain intact. No external application
 actions are implemented.
 
-Latest complete test run: 172 passed, 0 failed (November 5, 2026). The original 148
+Latest complete test run: 224 passed (172 earlier tests unchanged plus 52 new filter/classification/scoring/cache/page tests), 0 failed (November 5, 2026). The original 148
 tests are unchanged. Synthetic fixtures only; setup layout and PDF export visually
 checked. One test-only HTTPX deprecation warning remains; no runtime failure.
 
@@ -29,7 +29,13 @@ Published: Phase 2.5 main and annotated v0.2.5 both point to
 078dca6cbea48e0f888d8529cd6d30e9acf91ab6. Existing v0.2.0 unchanged. No Phase 3
 commits have been pushed and v0.3.0 has not been created.
 
-Latest fix: matching jobs now reads one read-only SQLite page of 20 latest distinct
+Job filtering enhancement (uncommitted until approval): persistent filters, explainable job-field
+classification, rebalanced matching (title component, vocabulary of ~330 terms, redistributed
+weights, low-evidence flag, plain summary), match cache and job-feature cache in the private
+database (schema 3), Not interested, new-since-last-visit, source labels, stale warning, and a
+verified employer expansion (15,365 jobs from 89 boards). Details: docs/phase-3.md.
+
+Earlier fix: matching jobs now reads one read-only SQLite page of 20 latest distinct
 jobs, then scores only that page. Search/order/count are server-side; stored jobs and
 profiles are unchanged. There is no score cache, so changed verified facts or job
 descriptions are reflected on the next request. Database failures show HTTP 503.

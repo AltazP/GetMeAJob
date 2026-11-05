@@ -40,11 +40,14 @@ The old resume and its verified facts stay available. Review and verify the new 
 then make it your default from the Resumes page if desired. Matching, letter editing
 and TXT/DOCX/PDF/ZIP downloads remain browser-based.
 
-**Matching jobs** opens 20 stored jobs at a time, most recently checked first.
-The page computes relevance for those 20 jobs and does not run a live job search.
-Use Next and Previous to browse; a busy or invalid local database displays an error
-you can retry. Scores refresh when you open a page after verifying facts or updating
-stored job postings.
+**Matching jobs** shows 20 stored jobs per page with a Filters panel (job field,
+role words, employment type, work arrangement, level, location and distance, salary,
+posted date, companies, minimum match, sorting). Apply tries filters, Save preferences
+keeps them for next time, Reset clears only the saved filters. Details such as a
+source did not provide are shown as Unknown. The page never runs a live search and the
+jobs are stored copies: always check the original posting is still open. To refresh
+jobs run `.venv/bin/python -m getmeajob search --all-enabled --config config/live-discovery.toml`.
+Full filter semantics, scoring weights and the match cache are in docs/phase-3.md.
 
 On a fresh checkout, first install the free project-local dependencies:
 

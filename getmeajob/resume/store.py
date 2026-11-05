@@ -15,7 +15,7 @@ class ProfileStore:
         self.path = directory / 'profiles.sqlite3'
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 2:
+            if version > 3:
                 raise ValueError('Private database is newer than this application.')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -41,6 +41,19 @@ class ProfileStore:
                         PRAGMA user_version=2; COMMIT;""")
                 except Exception:
                     db.rollback(); raise
+            if version < 3:
+                # Derived, rebuildable match results; never the only copy of any user record.
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS match_cache(job_id INTEGER NOT NULL,resume_id INTEGER NOT NULL,
+                            job_hash TEXT NOT NULL,facts_hash TEXT NOT NULL,algo_hash TEXT NOT NULL,
+                            score INTEGER NOT NULL,result TEXT NOT NULL,PRIMARY KEY(job_id,resume_id));
+                        CREATE INDEX IF NOT EXISTS match_cache_resume ON match_cache(resume_id);
+                        CREATE TABLE IF NOT EXISTS job_features(job_id INTEGER PRIMARY KEY,job_hash TEXT NOT NULL,vocab_hash TEXT NOT NULL,features TEXT NOT NULL);
+                        CREATE TABLE IF NOT EXISTS dismissed_jobs(job_id INTEGER PRIMARY KEY,dismissed TEXT NOT NULL);
+                        PRAGMA user_version=3; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
         os.chmod(self.path, 0o600)
 
     def connect(self):
@@ -57,6 +70,46 @@ class ProfileStore:
     def set_setting(self,key,value):
         with self.connect() as db:
             db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+
+    def dismissed(self):
+        with self.connect() as db:
+            return {r[0] for r in db.execute('SELECT job_id FROM dismissed_jobs')}
+
+    def dismiss(self,job_id,hide=True):
+        """Hide or restore a job in this app only; the job database is never touched."""
+        with self.connect() as db:
+            if hide: db.execute('INSERT OR REPLACE INTO dismissed_jobs VALUES(?,?)',(job_id,utc_now()))
+            else: db.execute('DELETE FROM dismissed_jobs WHERE job_id=?',(job_id,))
+
+    def restore_all_dismissed(self):
+        with self.connect() as db: db.execute('DELETE FROM dismissed_jobs')
+
+    def delete_setting(self,key):
+        with self.connect() as db: db.execute('DELETE FROM settings WHERE key=?',(key,))
+
+    def cache_rows(self,resume_ids,with_result=False):
+        """{(job_id,resume_id): (job_hash,facts_hash,algo_hash,score[,result])} for the given resumes."""
+        if not resume_ids: return {}
+        marks=','.join('?'*len(resume_ids))
+        columns='job_id,resume_id,job_hash,facts_hash,algo_hash,score'+(',result' if with_result else '')
+        with self.connect() as db:
+            rows=db.execute(f'SELECT {columns} FROM match_cache WHERE resume_id IN ({marks})',tuple(resume_ids)).fetchall()
+        return {(r[0],r[1]):tuple(r[2:]) for r in rows}
+
+    def feature_rows(self):
+        with self.connect() as db:
+            return {r[0]:(r[1],r[2],r[3]) for r in db.execute('SELECT job_id,job_hash,vocab_hash,features FROM job_features')}
+
+    def feature_save(self,entries):
+        if not entries: return
+        with self.connect() as db:
+            db.executemany('INSERT OR REPLACE INTO job_features VALUES(?,?,?,?)',entries)
+
+    def cache_save(self,entries):
+        """entries: (job_id,resume_id,job_hash,facts_hash,algo_hash,score,result_json). One transaction."""
+        if not entries: return
+        with self.connect() as db:
+            db.executemany('INSERT OR REPLACE INTO match_cache VALUES(?,?,?,?,?,?,?)',entries)
 
     def resumes(self):
         with self.connect() as db:

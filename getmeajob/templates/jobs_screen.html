@@ -1,0 +1,69 @@
+<section>
+<h2>Stored jobs</h2>
+<p>{{ stats.stored }} stored job(s) from {{ stats.employers }} employer(s){% if stats.sources %} via {% for name,count in stats.sources.items() %}{{ name|title }} ({{ count }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.{% if stats.new_count %} <span class="status verified">{{ stats.new_count }} new since your last visit</span>{% endif %}</p>
+{% if stale_days is not none and stale_days>=3 %}<p class="warning">Job data was last refreshed {{ stale_days }} day(s) ago. To refresh, stop this page (Control+C in Terminal) or open a second Terminal tab and run: <code>.venv/bin/python -m getmeajob search --all-enabled --config config/live-discovery.toml</code></p>{% elif stats.stored==0 %}<p class="warning">No jobs are stored yet. Run <code>.venv/bin/python -m getmeajob search --all-enabled --config config/live-discovery.toml</code> in Terminal.</p>{% endif %}
+{% if view_dismissed %}<p><strong>Showing jobs you marked Not interested.</strong> <a href="/jobs">Back to jobs</a></p>{% elif stats.dismissed_count %}<p><a href="/jobs?hidden=1">{{ stats.dismissed_count }} job(s) hidden as Not interested</a></p>{% endif %}
+<h2>Filters</h2>
+{% if error %}<p class="warning" role="alert">{{ error }}</p>{% endif %}
+<p>{{ total }} stored job(s) found{% if chips %} with {{ chips|length }} active filter(s){% endif %}.</p>
+{% if chips %}<p>{% for chip in chips %}<span class="status verified">{{ chip }}</span> {% endfor %}</p>{% else %}<p>No filters active: showing all stored jobs.</p>{% endif %}{% if chips|length==1 and f.canada_only %}<p>No other filters active.</p>{% endif %}
+<p><small>These are stored jobs, not live listings. Stored job; verify the original posting is still open before applying. Metadata a source did not provide is shown as Unknown, never guessed.</small></p>
+{% for note in notices %}<p class="warning">{{ note }}</p>{% endfor %}
+<details {% if chips or error %}open{% endif %}><summary>Show or hide filters</summary>
+<form method="post" action="/jobs/filters/apply">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label>Search employer or role text <input name="q" value="{{ f.q }}" maxlength="120"></label>
+<fieldset><legend>Job field (any of)</legend>{% for v in options.fields %}<label class="inline"><input type="checkbox" name="field" value="{{ v }}" {% if v in f.fields %}checked{% endif %}> {{ v }}</label> {% endfor %}
+<br><small>Field comes from the source's industry/department when present, otherwise from title keywords; unsupported jobs are Other.</small></fieldset>
+<label>Role names or keywords to include in the title (separate with commas or new lines)<textarea name="role" rows="2" maxlength="900">{{ f.roles|join('\n') }}</textarea></label>
+<label>Title keywords to exclude (commas or new lines)<textarea name="exclude" rows="2" maxlength="900">{{ f.excluded_keywords|join('\n') }}</textarea></label>
+<fieldset><legend>Employment type (any of)</legend>{% for v,label in options.employment.items() %}<label class="inline"><input type="checkbox" name="type" value="{{ v }}" {% if v in f.employment_types %}checked{% endif %}> {{ label }}</label> {% endfor %}</fieldset>
+<fieldset><legend>Work arrangement (any of)</legend>{% for v,label in options.arrangements.items() %}<label class="inline"><input type="checkbox" name="arrangement" value="{{ v }}" {% if v in f.work_arrangements %}checked{% endif %}> {{ label }}</label> {% endfor %}</fieldset>
+<fieldset><legend>Experience level (any of)</legend>{% for v in options.levels %}<label class="inline"><input type="checkbox" name="level" value="{{ v }}" {% if v in f.experience_levels %}checked{% endif %}> {{ v }}</label> {% endfor %}
+<br><small>Level uses the source's level, or a word in the title (Junior, Senior, Intern…).</small></fieldset>
+<fieldset><legend>Region</legend>
+<label class="inline"><input type="radio" name="canada" value="1" {% if f.canada_only %}checked{% endif %}> Canada only (a location must name Canada, a province or a Canadian city)</label><br>
+<label class="inline"><input type="radio" name="canada" value="0" {% if not f.canada_only %}checked{% endif %}> Anywhere</label></fieldset>
+<fieldset><legend>Location</legend>
+<div class="field-grid"><label>City <input name="city" value="{{ f.city }}" maxlength="60" placeholder="Waterloo"></label>
+<label>Province <select name="province"><option value="">Any</option>{% for name in options.provinces %}<option value="{{ name }}" {% if name==f.province %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label>Distance (km) <input name="radius" type="number" min="1" max="20000" value="{{ f.radius_km|int }}"></label></div>
+<label><input type="checkbox" name="remote_region" value="1" {% if f.remote_in_region %}checked{% endif %}> Also include remote jobs whose location names my province or Canada</label>
+<label><input type="checkbox" name="unplaced" value="1" {% if f.include_unplaced %}checked{% endif %}> Also include jobs whose location is not on the offline city list (cannot be distance-checked)</label>
+<small>Distances are straight-line from city centres on an offline list. Remote eligibility does not prove work authorization, timezone or visa fit.</small></fieldset>
+<fieldset><legend>Salary</legend><div class="field-grid"><label>Minimum <input name="salary" inputmode="decimal" value="{{ f.minimum_salary|int if f.minimum_salary is not none else '' }}"></label>
+<label>Currency <select name="currency">{% for c in options.currencies %}<option {% if c==f.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+<label>Pay period <select name="interval">{% for v,label in options.intervals.items() %}<option value="{{ v }}" {% if v==f.interval %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
+<small>Salaries listed in another currency or pay period are not converted and do not match.</small></fieldset>
+<label>Posted <select name="posted"><option value="">Anytime</option>{% for v,label in options.posted.items() %}<option value="{{ v }}" {% if v==f.posted_days %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Companies to include (one per line)<textarea name="company" rows="2" maxlength="900">{{ f.companies|join('\n') }}</textarea></label>
+<label>Companies to exclude (one per line)<textarea name="exclude_company" rows="2" maxlength="900">{{ f.excluded_companies|join('\n') }}</textarea></label>
+<label>Minimum resume match (%) <input name="min_score" type="number" min="0" max="100" value="{{ f.minimum_score }}"></label>
+<label>Sort by <select name="sort">{% for v,label in options.sorts.items() %}<option value="{{ v }}" {% if v==f.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<fieldset><legend>Jobs with unknown details</legend>
+<label class="inline"><input type="radio" name="unknown" value="1" {% if f.include_unknown %}checked{% endif %}> Include them when a filter above needs that detail</label><br>
+<label class="inline"><input type="radio" name="unknown" value="0" {% if not f.include_unknown %}checked{% endif %}> Hide them</label></fieldset>
+<button>Apply filters</button> <button formaction="/jobs/filters/save">Save preferences</button>
+</form>
+<form method="post" action="/jobs/filters/reset"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Reset filters</button> <small>Clears the saved preferences too. Resumes, facts, packages and jobs are not touched.</small></form>
+</details></section>
+<p><strong>Sort by:</strong> {% for key,label in options.sorts.items() %}{% if key==f.sort %}<b>{{ label }}</b>{% else %}<a href="/jobs?{{ sort_queries[key] }}">{{ label }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+<p>Showing up to 20 jobs per page. Match is the best score among your resume versions that have verified facts; relevance, not hiring probability.</p>
+{% for item in results %}<article><h2>{{ item.job.role }}</h2>
+<p>{{ item.job.employer }} · {{ item.job.locations|join('; ') or 'Unknown location' }} {% if item.is_new %}<span class="status verified">New</span>{% endif %} <small>Source: {{ item.job.source|title }}</small></p>
+<p><span class="status pending">{{ item.field }}</span> <small>{{ item.field_reason }}</small></p>
+<ul><li>Employment type: {{ (item.job.employment_type or 'Unknown')|replace('-', ' ')|title }}</li>
+<li>Work arrangement: {{ (item.job.work_arrangement or 'Unknown')|replace('-', ' ')|title }}</li>
+<li>Experience level: {{ item.level or 'Unknown' }}{% if item.level %} <small>({{ item.level_reason }})</small>{% endif %}</li>
+<li>Salary: {% if item.job.salary.minimum is not none %}{{ item.job.salary.minimum|int }}{% if item.job.salary.maximum is not none %}–{{ item.job.salary.maximum|int }}{% endif %} {{ item.job.salary.currency or '' }} {{ item.job.salary.interval or '' }}{% else %}Unknown{% endif %}</li>
+<li>Posted: {{ item.job.posted_at[:10] if item.job.posted_at else 'Unknown' }} · Last checked {{ item.checked[:10] }}</li></ul>
+<p><small>Stored job; verify the original posting is still open.</small></p>
+{% if item.score is not none %}<strong>{{ item.score }}% match</strong>{% if item.match.low_evidence %} <small>(low evidence: few comparable details in this posting or resume)</small>{% endif %}{% else %}<strong>No score yet</strong> <small>Verify facts in a resume version to see a match.</small>{% endif %}
+<p>Recommended resume: {{ item.resume.label if item.resume else 'None' }}</p>
+{% if item.match %}<p><em>{{ item.match.summary }}</em></p><p>Matched skills: {{ item.match.matched_skills|join(', ') or 'None identified' }}</p><p>Not evidenced, not confirmed mismatches: {{ item.match.not_evidenced_skills|join(', ') or 'None identified' }}</p>
+<details><summary>Score explanation and evidence</summary><p>{{ item.match.explanation }}</p><ul>{% for name,label in [('skills','Skills'),('title','Job title'),('employment','Experience & projects'),('coursework','Education & coursework')] %}{% if item.match.components[name] is none %}<li>{{ label }}: not applicable (no evidence on one side; weight shared by the rest)</li>{% else %}<li>{{ label }}: {{ (item.match.components[name]*100)|round|int }}% match · configured weight {{ item.match.weights[name] }} · effective share {{ item.match.effective_weights[name] }}%</li>{% endif %}{% endfor %}</ul>{% if item.match.matched_title_words %}<p>Title words found in your verified background: {{ item.match.matched_title_words|join(', ') }}</p>{% endif %}{% if item.match.relevant_experience %}<h3>Relevant verified experience</h3>{% for evidence in item.match.relevant_experience %}<pre>{{ evidence }}</pre>{% endfor %}{% endif %}{% if item.match.relevant_coursework %}<h3>Relevant verified coursework</h3>{% for evidence in item.match.relevant_coursework %}<p>{{ evidence }}</p>{% endfor %}{% endif %}{% if item.match.unknown_requirements %}<h3>Needs review</h3><ul>{% for note in item.match.unknown_requirements %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}</details>
+<form action="/packages" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="job_id" value="{{ item.id }}"><input type="hidden" name="resume_id" value="{{ item.resume.id }}"><details><summary>Optional existing local AI</summary><label>Existing Ollama model (blank uses deterministic generation)<input name="model" maxlength="100"></label><small>Opt-in requests only to 127.0.0.1:11434. Facts stay local; no installation or model download. AI may reorder verified facts only.</small></details><button>Prepare draft package</button></form>{% endif %}
+<form action="/jobs/dismiss" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="job_id" value="{{ item.id }}">{% if view_dismissed %}<input type="hidden" name="undo" value="1"><button>Restore this job</button>{% else %}<button>Not interested (hide)</button>{% endif %} <small>Only hides it in this app.</small></form></article>
+{% else %}<p>No stored jobs match these filters{% if not resumes_exist %}. Upload a resume to see match scores{% endif %}. Collect jobs with the existing discovery commands, or loosen a filter.</p>
+{% endfor %}
+{% if offset>0 %}<a href="/jobs?{{ prev_query }}">Previous</a>{% endif %} {% if offset+20<total %}<a href="/jobs?{{ next_query }}">Next</a>{% endif %}

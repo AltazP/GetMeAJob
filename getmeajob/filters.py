@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 
 from getmeajob.locations import DEFAULT_PLACES, Place, distance_km, resolve
 from getmeajob.models import Job
@@ -29,6 +30,10 @@ class SearchFilters:
     radius_km: float | None = 100
     include_remote_outside_radius: bool = False
     include_unknown: bool = False
+    # Dashboard options; the defaults keep the established Phase 1/2 behaviour.
+    company_match: str = "exact"  # "contains" lets "Stripe" match "Stripe, Inc."
+    excluded_scope: str = "text"  # "title" restricts excluded keywords to the job title
+    remote_regions: tuple[str, ...] = ()  # with include_remote_outside_radius: remote jobs must name one
 
 
 @dataclass(frozen=True)
@@ -47,12 +52,20 @@ def evaluate(job: Job, filters: SearchFilters, places: tuple[Place, ...] = DEFAU
         reasons.append("title")
     if any(term.casefold() not in text for term in filters.keywords):
         reasons.append("keywords")
-    if any(term.casefold() in text for term in filters.excluded_keywords):
+    excluded_text = job.role.casefold() if filters.excluded_scope == "title" else text
+    if any(term.casefold() in excluded_text for term in filters.excluded_keywords):
         reasons.append("excluded keyword")
     employer = job.employer.casefold()
-    if filters.companies and employer not in {item.casefold() for item in filters.companies}:
+
+    def listed(items: tuple[str, ...]) -> bool:
+        names = {item.casefold() for item in items}
+        if filters.company_match == "contains":
+            return any(name in employer or employer in name for name in names)
+        return employer in names
+
+    if filters.companies and not listed(filters.companies):
         reasons.append("company")
-    if employer in {item.casefold() for item in filters.excluded_companies}:
+    if filters.excluded_companies and listed(filters.excluded_companies):
         reasons.append("excluded company")
 
     def check(field: str, value: object, allowed: tuple[str, ...]) -> None:
@@ -92,7 +105,13 @@ def evaluate(job: Job, filters: SearchFilters, places: tuple[Place, ...] = DEFAU
     distance = min(distances) if distances else None
     if filters.radius_km is not None:
         bypass = filters.include_remote_outside_radius and job.work_arrangement == "remote"
-        if not bypass:
+        if bypass and filters.remote_regions:
+            # A remote label alone does not prove eligibility for the selected region.
+            if remote_names_region(job.locations, filters.remote_regions):
+                pass
+            else:
+                unknown.append("remote region eligibility")
+        elif not bypass:
             if distance is not None and distance <= filters.radius_km:
                 pass
             elif len(distances) < len(job.locations) or not job.locations:
@@ -102,3 +121,18 @@ def evaluate(job: Job, filters: SearchFilters, places: tuple[Place, ...] = DEFAU
     if unknown and not filters.include_unknown:
         reasons.extend(f"unknown {field}" for field in unknown)
     return Match(not reasons, distance, tuple(unknown), tuple(reasons))
+
+
+def remote_names_region(locations: tuple[str, ...], regions: tuple[str, ...]) -> bool:
+    """True when a location string explicitly names one of the regions (e.g. "Remote - Canada").
+
+    Two-letter codes are matched only in capitals, so "on" in ordinary words never counts.
+    """
+    for location in locations:
+        for region in regions:
+            if len(region) == 2:
+                if re.search(rf"(?<![A-Za-z]){region.upper()}(?![A-Za-z])", location) and region == region.upper():
+                    return True
+            elif re.search(rf"(?<!\w){re.escape(region)}(?!\w)", location, re.I):
+                return True
+    return False

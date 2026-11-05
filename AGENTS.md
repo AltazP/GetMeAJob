@@ -47,13 +47,16 @@ Use Python 3.11+; the Phase 1 and 2 runtime and tests use only the standard libr
 5. Automated job search using macOS launchd.
 6. Optional Playwright autofill and submission assistance.
 
-Current authorized scope: **Phase 2 — Job Discovery** (Phase 1 reviewed and approved).
-Extend the existing foundation with Greenhouse and Lever employer-board adapters,
-configurable filters, honest normalization, SQLite persistence and deduplication,
-a real search command and a separate synthetic offline demo. Test discovery,
-filtering, location handling, source failures and persistence. Do not begin Phase 3
-or later: no cover letters, email, scheduling, dashboard server, autofill or
-application submission. Ask before pushing each completed milestone.
+Current authorized scope: **Phase 2.5 — Employer Discovery and Source Expansion**.
+Preserve the tested/tagged Phase 2 implementation and existing job records. Add safe,
+versioned SQLite migrations, an employer/source registry, CSV import, evidence-based
+ATS detection, separate official-endpoint verification, Ashby public listed postings,
+permitted automatic discovery, health/coverage reporting, bounded networking and
+source controls. New candidates must never activate from URL patterns alone. Treat
+unsupported Workday/custom sources as records, not permission to scrape. Use offline
+fixtures for tests, run every existing test, commit tested milestones and ask before
+pushing. Do not start Phase 3 or implement resume matching, cover letters, email,
+scheduling, dashboard, autofill or submission.
 
 ## Security and privacy rules
 

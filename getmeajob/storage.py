@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from getmeajob.locations import normalized
 from getmeajob.models import Job, utc_now
+from getmeajob.migrations import migrate
 
 
 def canonical_url(url: str) -> str:
@@ -56,6 +57,8 @@ class JobStore:
             );
             CREATE INDEX IF NOT EXISTS observations_job ON observations(job_id);
         """)
+
+        migrate(self.connection)
 
     def close(self) -> None:
         self.connection.close()

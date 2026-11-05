@@ -1,0 +1,5 @@
+# Copy to config/settings.toml for local use. Never add credentials here.
+# Phase 1 validates these future dashboard settings; it starts no server.
+[dashboard]
+host = "127.0.0.1"
+port = 8000

@@ -1,0 +1,59 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage*
+htmlcov/
+
+# Local configuration, secrets and credentials (examples are safe to track)
+.env
+.env.*
+!.env.example
+config/*
+!config/*.example.toml
+secrets/
+credentials/
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*token*.json
+
+# All personal inputs, generated applications and runtime data belong here
+private/
+data/
+resumes/
+applications/
+logs/
+backups/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+*.pdf
+*.doc
+*.docx
+*.rtf
+*.csv
+*.xlsx
+
+# Browser authentication and session state
+.browser/
+playwright/.auth/
+storage-state*.json
+storage_state*.json
+
+# Local editor / macOS files
+.DS_Store
+.idea/
+.vscode/

@@ -26,6 +26,13 @@ def configure(commands):
     return group
 
 
+def make_checker(settings, requests: int = 120, store=None):
+    from getmeajob.openness import Checker
+    from getmeajob.sources.http import JsonClient
+    return Checker(JsonClient(interval=settings.request_interval_seconds, timeout=settings.discovery.timeout_seconds,
+                              max_requests=requests, per_host_limit=40, state=store))
+
+
 def explain(exc: Exception, address: str) -> str:
     """Plain-language reason for a failed send. Never includes the password."""
     name = type(exc).__name__
@@ -59,24 +66,34 @@ def run(args, settings, sender_factory=notify.gmail_sender, store=None) -> int:
         if not store.presets():
             print("No presets yet. Open Matching jobs in the browser, set filters and use 'Save as email preset'.")
         return 0
-    if action in ("preview", "send"):
-        digests = notify.build_digests(settings.database, store, only=args.preset)
-        for digest in digests:
-            note = f" ({'; '.join(digest.notes)})" if digest.notes else ""
-            print(f"{digest.preset['name']}: {len(digest.items)} new match(es) to include, {digest.total_new} matching in total{note}")
-        if action == "preview":
-            for path in notify.write_previews(digests, PRIVATE / "digests"):
-                print(f"Preview written: {path}")
-            print("Nothing was sent or marked as sent.")
-            return 0
+    if action == "send":
         address = store.get_setting("notify_address")
         if not address:
             raise ConfigurationError("Email is not set up. Run: .venv/bin/python -m getmeajob notify setup --address YOU@gmail.com")
-        report = notify.send_digests(store, digests, sender_factory(address))
+        with notify.send_lock(store.directory) as acquired:
+            if not acquired:
+                print("Another notification send is already running; skipping so nothing is emailed twice.")
+                return 0
+            # Build, send and record under the lock so a second sender sees what the first one already sent.
+            digests = notify.build_digests(settings.database, store, only=args.preset)
+            notify.screen_closed(store, digests, lambda: make_checker(settings, store=store))
+            for digest in digests:
+                note = f" ({'; '.join(digest.notes)})" if digest.notes else ""
+                print(f"{digest.preset['name']}: {len(digest.items)} new match(es) to include, {digest.total_new} matching in total{note}")
+            report = notify.send_digests(store, digests, sender_factory(address))
         print(f"Emails sent: {report['emails']} ({report['postings']} posting(s)).")
         for error in report["errors"]:
             print(f"Not sent, will retry next time: {error}")
         return 1 if report["errors"] else 0
+    if action == "preview":
+        digests = notify.build_digests(settings.database, store, only=args.preset)
+        for digest in digests:
+            note = f" ({'; '.join(digest.notes)})" if digest.notes else ""
+            print(f"{digest.preset['name']}: {len(digest.items)} new match(es) to include, {digest.total_new} matching in total{note}")
+        for path in notify.write_previews(digests, PRIVATE / "digests"):
+            print(f"Preview written: {path}")
+        print("Nothing was sent or marked as sent.")
+        return 0
     if action == "test":
         address = store.get_setting("notify_address")
         if not address:
@@ -98,8 +115,13 @@ def after_search(settings, sender_factory=notify.gmail_sender, store=None) -> No
         print("Notifications skipped: email is not set up (notify setup).")
         return
     try:
-        digests = notify.build_digests(settings.database, store)
-        report = notify.send_digests(store, digests, sender_factory(address))
+        with notify.send_lock(store.directory) as acquired:
+            if not acquired:
+                print("Notifications skipped: another send is already running.")
+                return
+            digests = notify.build_digests(settings.database, store)
+            notify.screen_closed(store, digests, lambda: make_checker(settings, store=store))
+            report = notify.send_digests(store, digests, sender_factory(address))
         print(f"Notifications: {report['emails']} email(s), {report['postings']} posting(s).")
         for error in report["errors"]:
             print(f"Notification not sent, will retry next time: {error}")

@@ -114,6 +114,35 @@ class OnlySelectedJobsTests(Base):
         self.assertEqual(digest.items, []); self.assertTrue(digest.notes)
 
 
+class SendLockTests(Base):
+    def test_only_one_send_at_a_time_and_a_second_sender_skips(self):
+        with notify.send_lock(self.store.directory) as first:
+            self.assertTrue(first)
+            with notify.send_lock(self.store.directory) as second: self.assertFalse(second)
+        with notify.send_lock(self.store.directory) as again: self.assertTrue(again)     # released afterwards
+
+    def test_cli_and_scheduled_sends_skip_when_another_send_holds_the_lock(self):
+        self.store.set_setting('notify_address', 'jane.smith@gmail.com')
+        sender = MagicMock(); factory = MagicMock(return_value=sender)
+        with notify.send_lock(self.store.directory) as held:
+            self.assertTrue(held)
+            args = argparse.Namespace(notify_action='send', preset=None); out = io.StringIO()
+            with redirect_stdout(out):
+                code = notify_cli.run(args, MagicMock(database=self.jobdb), factory, self.store)
+                notify_cli.after_search(MagicMock(database=self.jobdb), factory, self.store)
+        self.assertEqual(code, 0); sender.assert_not_called(); self.assertEqual(self.store.sent_ids(self.preset), set())
+        self.assertIn('already running', out.getvalue())
+
+    def test_second_sender_after_the_first_finishes_finds_nothing_new(self):
+        self.store.set_setting('notify_address', 'jane.smith@gmail.com')
+        sender = MagicMock(); factory = MagicMock(return_value=sender)
+        args = argparse.Namespace(notify_action='send', preset=None)
+        with redirect_stdout(io.StringIO()):
+            notify_cli.run(args, MagicMock(database=self.jobdb), factory, self.store)
+            notify_cli.run(args, MagicMock(database=self.jobdb), factory, self.store)
+        self.assertEqual(sender.call_count, 1)
+
+
 class SenderTests(unittest.TestCase):
     def test_gmail_sender_only_mails_the_owner_and_uses_keychain_password(self):
         server = MagicMock(); smtp = MagicMock(); smtp.return_value.__enter__.return_value = server

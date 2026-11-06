@@ -58,6 +58,11 @@ storage_state*.json
 .idea/
 .vscode/
 
+# Local AI review reports, logs, source snapshots and triage notes
+.reviews/
+.reviews-*/
+.reviews-notes.md
+
 # Only the reviewed public employer example may be committed; personal CSV imports stay ignored.
 !examples/employers.example.csv
 !examples/employers.starter.csv

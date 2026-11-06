@@ -89,8 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     employer_cli.configure(commands)
     from getmeajob import notify_cli
     notify_cli.configure(commands)
-    from getmeajob import schedule
+    from getmeajob import schedule, leads_cli
     schedule.configure(commands)
+    leads_cli.configure(commands)
     args = parser.parse_args(argv)
     try:
         settings = load_settings(args.config)
@@ -116,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ConfigurationError(str(exc)) from None
             print(f"Filled: {', '.join(report['filled']) or 'nothing'}. Still needs you: {', '.join(report['needs']) or 'nothing detected'}.")
             return 0
+        if args.command == "leads":
+            return leads_cli.run(args, settings)
         if args.command == "schedule":
             if args.schedule_action == "run":
                 return schedule.refresh(settings, notify_after=not args.no_notify)

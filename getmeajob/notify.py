@@ -11,15 +11,19 @@ Privacy and safety rules
 from dataclasses import dataclass, field, replace
 from email.message import EmailMessage
 from html import escape
+import fcntl
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import re
 import smtplib
 import subprocess
 from urllib.parse import urlparse
 
-from getmeajob import jobfilters, jobsquery
+from getmeajob import jobfilters, jobsquery, openness
+from getmeajob.sources.http import BudgetExceeded
 from getmeajob.resume.intelligence import match, stored_weights
+from getmeajob.sources.leadlists import LABELS as LEAD_LABELS
 
 KEYCHAIN_SERVICE = "getmeajob-gmail"
 DIGEST_SIZE = 30            # postings per email; the rest roll over to the next digest
@@ -38,6 +42,7 @@ class Digest:
     items: list = field(default_factory=list)   # dicts: row, score, summary, resume
     total_new: int = 0
     notes: list = field(default_factory=list)
+    dropped_closed: int = 0
 
 
 def safe_link(*urls):
@@ -45,6 +50,18 @@ def safe_link(*urls):
         if url and urlparse(url).scheme in ("http", "https"):
             return url
     return None
+
+
+@contextmanager
+def send_lock(directory: Path):
+    """One notification send at a time (scheduled refresh, `notify send`, `search --notify`). Yields False if another is running."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(directory / "notify.lock", "w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False; return
+        yield True
 
 
 def preset_filters(preset: dict) -> jobfilters.JobFilters:
@@ -86,6 +103,35 @@ def build_digests(job_db: Path, store, scorer=match, limit: int = DIGEST_SIZE, o
     return digests
 
 
+API_SOURCES = {"greenhouse", "lever", "ashby"}
+
+
+def screen_closed(store, digests: list[Digest], checker) -> None:
+    """Check list-sourced postings (not just refreshed from an employer's own board) and drop the ones found closed."""
+    live = None   # `checker` may be a Checker or a function that builds one; it is only built if a check is needed
+    for digest in digests:
+        kept = []
+        stopped = False
+        for item in digest.items:
+            job = item["row"].job
+            if stopped or job.source in API_SOURCES:
+                kept.append(item); continue
+            if live is None:
+                live = checker if hasattr(checker, "check") else checker()
+            try:
+                result = openness.ensure_check(store, live, item["row"].id, job.application_url)
+            except BudgetExceeded:
+                stopped = True; kept.append(item); continue
+            item["open"] = result
+            if result.status == "CLOSED":
+                digest.dropped_closed += 1
+            else:
+                kept.append(item)
+        digest.items = kept
+        if digest.dropped_closed:
+            digest.notes.append(f"{digest.dropped_closed} posting(s) left out because they appear to be closed.")
+
+
 def render(digest: Digest) -> tuple[str, str, str]:
     """Return (subject, plain text, html). Everything from a posting is untrusted and escaped."""
     name = digest.preset["name"]
@@ -100,12 +146,14 @@ def render(digest: Digest) -> tuple[str, str, str]:
         row, job = item["row"], item["row"].job
         link = safe_link(job.original_url, job.application_url)
         where = "; ".join(job.locations) or "Unknown location"
-        text += [f"{number}. {item['score']}%  {job.role} — {job.employer}", f"   {where} | {row.field} | {job.source.title()}",
+        seen = item.get("open")
+        status = ("Confirmed open when checked" if seen and seen.status == "OPEN" else "Could not confirm it is still open" if seen else "")
+        text += [f"{number}. {item['score']}%  {job.role} — {job.employer}", f"   {where} | {row.field} | {LEAD_LABELS.get(job.source, job.source.title())}" + (f" | {status}" if status else ""),
                  f"   {item['summary']}", f"   {link or '(no link available)'}", ""]
         title = escape(job.role)
         title = f'<a href="{escape(link, quote=True)}">{title}</a>' if link else title
         body.append(f"<p><b>{item['score']}%</b> · {title} — {escape(job.employer)}<br>"
-                    f"<small>{escape(where)} · {escape(row.field)} · {escape(job.source.title())}<br>{escape(item['summary'])}</small></p>")
+                    f"<small>{escape(where)} · {escape(row.field)} · {escape(LEAD_LABELS.get(job.source, job.source.title()))}{(' · ' + status) if status else ''}<br>{escape(item['summary'])}</small></p>")
     if more > 0:
         text.append(f"{more} more matching posting(s) will be in the next digest.")
         body.append(f"<p>{more} more matching posting(s) will be in the next digest.</p>")

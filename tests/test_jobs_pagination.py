@@ -16,8 +16,9 @@ class JobPageTests(unittest.TestCase):
     csrf=fixtures.DashboardTests.csrf
     login=fixtures.DashboardTests.login
 
-    def seed(self,count):
-        now='2026-11-05T00:00:00+00:00'
+    def seed(self,count,now=None):
+        from getmeajob.models import utc_now
+        now=now or utc_now()   # a real refresh stamps every job of a board with the same time
         with sqlite3.connect(self.jobdb) as db:
             for number in range(count):
                 identity=db.execute('INSERT INTO jobs(first_discovered,last_checked,last_updated) VALUES(?,?,?)',(now,now,now)).lastrowid
@@ -48,7 +49,7 @@ class JobPageTests(unittest.TestCase):
         self.assertNotIn('Synthetic Developer 10',filtered.text)
 
     def test_latest_duplicate_observation_and_current_job_description(self):
-        self.seed(1)
+        self.seed(1,'2026-11-05T00:00:00+00:00')
         rows,total=job_page(self.jobdb)
         self.assertEqual(total,2)
         identity=next(key for key,item,_ in rows if item.role=='Synthetic Developer 0')

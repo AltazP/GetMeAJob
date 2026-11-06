@@ -114,6 +114,11 @@ def refresh(settings, notify_after: bool = True, log=print) -> int:
                 log(f"Pass {number + 1}: {result.fetched} postings from {result.successful_boards} source(s), {len(deferred)} deferred, {failures} failed.")
                 if not deferred:
                     break
+            try:   # community lists add large employers the public job-board APIs do not reach
+                from getmeajob.leads_cli import import_leads
+                import_leads(store, settings, log=log)
+            except Exception as exc:   # a list being down must never stop the refresh or the emails
+                log(f"Community lists skipped: {type(exc).__name__}")
         if notify_after:
             notify_cli.after_search(settings)
         return 0

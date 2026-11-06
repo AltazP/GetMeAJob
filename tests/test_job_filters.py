@@ -6,6 +6,7 @@ import re
 import sqlite3
 import time
 import unittest
+from unittest.mock import patch
 
 from starlette.datastructures import QueryParams
 
@@ -371,6 +372,65 @@ class MatchScoreFilterTests(FilterBase):
             self.assertGreaterEqual(db.execute('SELECT COUNT(*) FROM match_cache').fetchone()[0], 3)
         with sqlite3.connect(self.jobdb) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='match_cache'").fetchone()[0], 0)
+
+
+class ReviewFixTests(FilterBase):
+    def test_cache_rows_can_be_limited_to_visible_jobs(self):
+        resume = self.verified_resume(('skills', 'Python'))
+        for job_id in (1, 2, 3): self.app.state.store.cache_save([(job_id, resume, 'h', 'f', 'a', 50, '{"summary": "x"}')])
+        store = self.app.state.store
+        self.assertEqual({k[0] for k in store.cache_rows([resume], with_result=True, job_ids=[2])}, {2})
+        self.assertEqual(store.cache_rows([resume], job_ids=[]), {}); self.assertEqual(len(store.cache_rows([resume])), 3)
+        with self.assertRaises(ValueError): store.cache_rows([resume], job_ids=list(range(501)))
+
+    def test_visible_page_reads_only_its_own_cached_results(self):
+        for n in range(30): self.add(role=f'Python Developer {n}', department=None, industry=None)
+        self.verified_resume(('skills', 'Python'))
+        store = self.app.state.store; seen = []
+        original = store.cache_rows
+        store.cache_rows = lambda *a, **k: (seen.append(k.get('job_ids')), original(*a, **k))[1]
+        jobsquery.run(self.jobdb, store, jobfilters.parse(q('canada=0')), stored_weights(None), match, now=NOW)
+        full_reads = [ids for ids in seen if ids is not None]
+        self.assertTrue(full_reads and all(len(ids) <= 20 for ids in full_reads))
+
+    def test_job_cap_keeps_the_newest_and_says_so(self):
+        for n in range(5): self.add(role=f'Cap Job {n}', department=None, industry=None)
+        with patch.object(jobsquery, 'MAX_JOBS', 3):
+            result = jobsquery.run(self.jobdb, self.app.state.store, jobfilters.parse(q('canada=0')), stored_weights(None), match, now=NOW)
+        self.assertEqual(len(result.rows), 3); self.assertTrue(any('most recently checked' in n for n in result.notices))
+        self.assertEqual({r.job.role for r in result.rows}, {'Cap Job 2', 'Cap Job 3', 'Cap Job 4'})
+        again = jobsquery.run(self.jobdb, self.app.state.store, jobfilters.parse(q('canada=0')), stored_weights(None), match, now=NOW)
+        self.assertEqual(len(again.rows), 5); self.assertFalse(again.notices)
+
+
+class ReviewFix2Tests(FilterBase):
+    def test_full_api_data_wins_over_a_sparse_list_entry_even_when_the_list_was_seen_later(self):
+        from getmeajob.models import Salary
+        from getmeajob.resume.intelligence import job_by_id
+        api = replace(job(), source='greenhouse', board='coopinc', source_id='555', role='Data Co-op', employer='Coop Inc', description='Python SQL reporting role', industry=None,
+                      application_url='https://job-boards.greenhouse.io/coopinc/jobs/555', salary=Salary(60000, 80000, 'CAD', 'year'))
+        listed = replace(job(), source='simplify', board='simplifyjobs', source_id='abc', role='Data Co-op', employer='Coop Inc', description='Community list category: Data.',
+                         industry=None, application_url='https://job-boards.greenhouse.io/coopinc/jobs/555', salary=Salary())
+        with JobStore(self.jobdb) as db:
+            first = db.upsert(api, now='2026-11-01T00:00:00+00:00'); second = db.upsert(listed, now='2026-11-05T00:00:00+00:00')
+        self.assertEqual(first, second)
+        result = jobsquery.run(self.jobdb, self.app.state.store, jobfilters.parse(q('canada=0&salary=50000&unknown=0')), stored_weights(None), match, now=NOW)
+        self.assertEqual([r.job.description for r in result.rows], ['Python SQL reporting role'])       # salary filter still sees the API data
+        self.assertEqual(job_by_id(self.jobdb, first)[0].description, 'Python SQL reporting role')    # and packages are built from it
+
+    def test_score_reads_are_limited_to_candidate_jobs_and_features_only_for_jobs_that_need_scoring(self):
+        for n in range(6): self.add(role=f'Python Developer {n}', description='Python SQL', department=None, industry=None)
+        self.verified_resume(('skills', 'Python SQL'))
+        store = self.app.state.store; cache_calls, feature_calls = [], []
+        cache_rows, feature_rows = store.cache_rows, store.feature_rows
+        store.cache_rows = lambda *a, **k: (cache_calls.append(k.get('job_ids')), cache_rows(*a, **k))[1]
+        store.feature_rows = lambda ids=None: (feature_calls.append(ids), feature_rows(ids))[1]
+        run = lambda: jobsquery.run(self.jobdb, store, jobfilters.parse(q('canada=0&sort=match')), stored_weights(None), match, now=NOW)
+        run()
+        self.assertTrue(all(ids is not None and len(ids) <= 500 for ids in cache_calls))
+        self.assertTrue(all(ids is not None and len(ids) <= 500 for ids in feature_calls)); self.assertTrue(any(feature_calls))
+        feature_calls.clear(); run()
+        self.assertEqual([ids for ids in feature_calls if ids], [])                  # everything cached: no feature reads at all
 
 
 class DashboardFilterPageTests(FilterBase):

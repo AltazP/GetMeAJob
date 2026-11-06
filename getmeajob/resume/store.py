@@ -15,7 +15,7 @@ class ProfileStore:
         self.path = directory / 'profiles.sqlite3'
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 6:
+            if version > 8:
                 raise ValueError('Private database is newer than this application.')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -84,6 +84,23 @@ class ProfileStore:
                         PRAGMA user_version=6; COMMIT;""")
                 except Exception:
                     db.rollback(); raise
+            if version < 7:
+                # Results of "is this posting still open?" checks (derived, safe to rebuild).
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS open_checks(job_id INTEGER PRIMARY KEY,url TEXT NOT NULL,status TEXT NOT NULL,
+                            reason TEXT NOT NULL,checked TEXT NOT NULL);
+                        PRAGMA user_version=7; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
+            if version < 8:
+                # Host pauses after 401/403/429 answers to openness checks (kept here so the dashboard never writes the jobs database).
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS check_pauses(host TEXT PRIMARY KEY,until TEXT NOT NULL);
+                        PRAGMA user_version=8; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
         os.chmod(self.path, 0o600)
 
     def connect(self):
@@ -102,7 +119,7 @@ class ProfileStore:
             db.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
 
     def add_application(self,package_id,job_id,status,filled=(),needs=()):
-        if status not in ('form_opened','applied_by_user'): raise ValueError('Invalid application status.')
+        if status not in ('form_opened','applied_by_user','blocked'): raise ValueError('Invalid application status.')
         with self.connect() as db:
             return db.execute('INSERT INTO applications(package_id,job_id,status,filled,needs,updated) VALUES(?,?,?,?,?,?)',
                 (package_id,job_id,status,json.dumps(list(filled)),json.dumps(list(needs)),utc_now())).lastrowid
@@ -111,6 +128,33 @@ class ProfileStore:
         with self.connect() as db:
             rows=db.execute('SELECT * FROM applications WHERE package_id=? ORDER BY id DESC',(package_id,)).fetchall()
         return [{**dict(r),'filled':json.loads(r['filled']),'needs':json.loads(r['needs'])} for r in rows]
+
+    def paused(self,host):
+        """Pause state used by the network client when checking postings."""
+        from datetime import datetime,timezone
+        with self.connect() as db: row=db.execute('SELECT until FROM check_pauses WHERE host=?',(host,)).fetchone()
+        return bool(row) and datetime.fromisoformat(row[0])>datetime.now(timezone.utc)
+
+    def pause(self,host,seconds):
+        from datetime import datetime,timedelta,timezone
+        try: until=(datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat()
+        except OverflowError: until=datetime.max.replace(tzinfo=timezone.utc).isoformat()
+        with self.connect() as db: db.execute('INSERT OR REPLACE INTO check_pauses VALUES(?,?)',(host,until))
+
+    def open_checks(self,job_ids=None):
+        """{job_id: {url,status,reason,checked}}; job_ids (at most 500) limits the read."""
+        with self.connect() as db:
+            if job_ids is None: rows=db.execute('SELECT job_id,url,status,reason,checked FROM open_checks').fetchall()
+            else:
+                if len(job_ids)>500: raise ValueError('Too many job ids for one read.')
+                if not job_ids: return {}
+                rows=db.execute(f'SELECT job_id,url,status,reason,checked FROM open_checks WHERE job_id IN ({",".join("?"*len(job_ids))})',tuple(job_ids)).fetchall()
+        return {r[0]:{'url':r[1],'status':r[2],'reason':r[3],'checked':r[4]} for r in rows}
+
+    def save_open_check(self,job_id,url,status,reason):
+        if status not in ('OPEN','CLOSED','UNKNOWN'): raise ValueError('Invalid status.')
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO open_checks VALUES(?,?,?,?,?)',(job_id,url[:2000],status,reason[:300],utc_now()))
 
     MAX_COVER_LETTERS=10
 
@@ -124,7 +168,8 @@ class ProfileStore:
         return dict(row)
 
     def add_cover_letter(self,label,filename,text):
-        label=' '.join(label.split())[:80] or 'My cover letter'; text=text.strip()
+        from getmeajob.resume.reflow import reflow
+        label=' '.join(label.split())[:80] or 'My cover letter'; text=reflow(text)
         if not 40<=len(text)<=20000: raise ValueError('A cover letter must be between 40 and 20,000 characters.')
         with self.connect() as db:
             if db.execute('SELECT COUNT(*) FROM cover_letters').fetchone()[0]>=self.MAX_COVER_LETTERS: raise ValueError(f'At most {self.MAX_COVER_LETTERS} saved cover letters; delete one first.')
@@ -178,18 +223,28 @@ class ProfileStore:
     def delete_setting(self,key):
         with self.connect() as db: db.execute('DELETE FROM settings WHERE key=?',(key,))
 
-    def cache_rows(self,resume_ids,with_result=False):
-        """{(job_id,resume_id): (job_hash,facts_hash,algo_hash,score[,result])} for the given resumes."""
-        if not resume_ids: return {}
-        marks=','.join('?'*len(resume_ids))
+    def cache_rows(self,resume_ids,with_result=False,job_ids=None):
+        """{(job_id,resume_id): (job_hash,facts_hash,algo_hash,score[,result])} for the given resumes (and jobs, if given)."""
+        if not resume_ids or job_ids==[]: return {}
+        marks=','.join('?'*len(resume_ids)); arguments=list(resume_ids); jobs=''
+        if job_ids is not None:
+            if len(job_ids)>500: raise ValueError('Too many job ids for one cache read.')
+            jobs=f' AND job_id IN ({",".join("?"*len(job_ids))})'; arguments+=list(job_ids)
         columns='job_id,resume_id,job_hash,facts_hash,algo_hash,score'+(',result' if with_result else '')
         with self.connect() as db:
-            rows=db.execute(f'SELECT {columns} FROM match_cache WHERE resume_id IN ({marks})',tuple(resume_ids)).fetchall()
+            rows=db.execute(f'SELECT {columns} FROM match_cache WHERE resume_id IN ({marks}){jobs}',tuple(arguments)).fetchall()
         return {(r[0],r[1]):tuple(r[2:]) for r in rows}
 
-    def feature_rows(self):
+    def feature_rows(self,job_ids=None):
+        """Cached per-posting features; pass job_ids (at most 500) to read only those postings."""
         with self.connect() as db:
-            return {r[0]:(r[1],r[2],r[3]) for r in db.execute('SELECT job_id,job_hash,vocab_hash,features FROM job_features')}
+            if job_ids is None:
+                rows=db.execute('SELECT job_id,job_hash,vocab_hash,features FROM job_features').fetchall()
+            else:
+                if len(job_ids)>500: raise ValueError('Too many job ids for one feature read.')
+                if not job_ids: return {}
+                rows=db.execute(f'SELECT job_id,job_hash,vocab_hash,features FROM job_features WHERE job_id IN ({",".join("?"*len(job_ids))})',tuple(job_ids)).fetchall()
+        return {r[0]:(r[1],r[2],r[3]) for r in rows}
 
     def feature_save(self,entries):
         if not entries: return

@@ -164,3 +164,84 @@ class PagesTests(FilterBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReflowTests(unittest.TestCase):
+    SHREDDED = "\n\n".join(("Dear Hiring Team, I am building Stratify, a full-stack algorithmic trading platform that supports backtesting. "
+        "I enjoy solving hard problems. In my last role I shipped features weekly. I wrote tests for every change. Working with a team taught me to communicate early. "
+        "Thank you for your time. Sincerely, Jane Doe").split())
+
+    def test_one_word_per_block_text_becomes_real_paragraphs_without_changing_words(self):
+        from getmeajob.resume.reflow import reflow
+        fixed = reflow(self.SHREDDED)
+        self.assertEqual(fixed.split(), self.SHREDDED.split())              # same words, same order
+        blocks = fixed.split("\n\n")
+        self.assertTrue(blocks[0].startswith("Dear Hiring Team,")); self.assertLessEqual(len(blocks), 6)
+        self.assertGreater(len(blocks[1].split()), 10); self.assertTrue(fixed.endswith("Sincerely,\nJane Doe"))
+        self.assertEqual(reflow(fixed), fixed)                                # idempotent
+
+    def test_wrapped_lines_are_joined_but_short_lines_are_kept(self):
+        from getmeajob.resume.reflow import reflow
+        text = ("I have been building software for several years and enjoy turning messy\nrequirements into reliable tools that people use every day.\n\n"
+                "Sincerely,\nJane Doe")
+        fixed = reflow(text)
+        self.assertIn("messy requirements into reliable tools", fixed); self.assertTrue(fixed.endswith("Sincerely,\nJane Doe"))
+
+    def test_normal_letters_are_unchanged_and_empty_is_empty(self):
+        from getmeajob.resume.reflow import reflow
+        self.assertEqual(reflow(TEMPLATE), TEMPLATE); self.assertEqual(reflow("  \n\n "), "")
+
+    def test_improver_repairs_a_shredded_upload_and_titles_lose_attached_locations(self):
+        text, _, _, _, _ = adapt_letter(self.SHREDDED, job(role="Backend Developer", employer="Acme Corp", description="Python", industry=None), FACTS, None, "Jane Doe")
+        self.assertGreater(len(text.split("\n\n")[1].split()), 8)             # no word-per-paragraph output
+        self.assertLess(len(text.split("\n\n")), 12)
+        facts = [{**FACTS[1], "structure": {"employer": "Fidelity Investments", "title": "Software Developer Toronto, ON", "achievements": ["Built APIs."]}}, FACTS[0]]
+        letter_text = adapt_letter(TEMPLATE, job(role="Backend Developer", employer="Acme Corp", description="Python", industry=None), facts, None, "Jane Doe")[0]
+        self.assertIn("as a Software Developer at Fidelity Investments", letter_text); self.assertNotIn("Toronto, ON at", letter_text)
+
+    def test_saved_letters_are_repaired_on_upload(self):
+        from getmeajob.resume.store import ProfileStore
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as folder:
+            store = ProfileStore(pathlib.Path(folder)); identity = store.add_cover_letter("x", "x.pdf", self.SHREDDED)
+            self.assertLess(len(store.cover_letter(identity)["text"].split("\n\n")), 8)
+
+
+class WrittenForAnotherCompanyTests(unittest.TestCase):
+    LETTER = ("1 Example Street Springfield, ON, Canada, A1A 1A1 June 7, 2026 Dear Hiring Team, I am a student at Example University, and I am applying for the "
+              "Embedded Systems Intern role at Acme Drones. I am drawn to Acme Drones because the work sits at the intersection of software and impact. "
+              "The idea that tested code can deliver goods safely is the problem I want to grow into.\n\n"
+              "In my last role as a Developer at Sample Corp, I contributed to a platform.\n\n"
+              "I would love to discuss how my experience with Python and testing could contribute to Acme Drones's Embedded Systems team. Thank you for your time.\n\n"
+              "Sincerely,\nJane Doe")
+
+    def run_it(self, letter=None, name="Jane Doe", employer="Mercury", role="Program Manager - GTM"):
+        return adapt_letter(letter or self.LETTER, job(role=role, employer=employer, description="Python SQL", industry=None), FACTS, None, name)
+
+    def test_one_greeting_header_on_its_own_lines_and_todays_date(self):
+        from datetime import date
+        text, _, _, changes, _ = self.run_it()
+        blocks = text.split("\n\n")
+        today = date.today(); today_text = f"{today.strftime('%B')} {today.day}, {today.year}"
+        self.assertEqual(blocks[0], f"1 Example Street Springfield, ON, Canada, A1A 1A1\n{today_text}")
+        self.assertEqual(blocks[1], "Dear Mercury Hiring Team,")
+        self.assertEqual(text.count("Dear "), 1); self.assertNotIn("Hiring Team, I am", text); self.assertNotIn("June 7, 2026", text)
+        self.assertTrue(text.endswith("Sincerely,\nJane Doe"))
+        self.assertTrue(any("Updated the date" in c for c in changes)); self.assertTrue(any("own lines" in c for c in changes))
+
+    def test_a_letter_written_for_another_company_is_retargeted_without_wrong_claims(self):
+        text, _, _, changes, suggestions = self.run_it()
+        self.assertIn("applying for the Program Manager - GTM role at Mercury.", text)
+        self.assertNotIn("Acme Drones", text); self.assertNotIn("Embedded Systems Intern", text)
+        self.assertNotIn("drawn to", text); self.assertNotIn("The idea that tested code", text)               # sentences about the old company and its follow-up are gone
+        self.assertIn("could contribute to Mercury's team.", text)                                            # the closing is safely retargeted
+        self.assertIn("I am a student at Example University", text); self.assertIn("In my last role as a Developer at Sample Corp", text)   # the writer's own facts stay
+        joined = " ".join(suggestions)
+        self.assertIn("Removed because they were about Acme Drones", joined); self.assertIn("drawn to Acme Drones", joined)   # nothing is silently lost
+        self.assertTrue(any("Removed 2 sentence" in c for c in changes))
+
+    def test_two_greetings_collapse_to_one_and_a_same_company_letter_is_left_alone(self):
+        text, *_ = self.run_it("Dear Hiring Team,\n\nDear Hiring Manager,\n\nI am applying for the Backend Role role at Mercury. I like databases.\n\nSincerely,\nJane Doe", employer="Mercury")
+        self.assertEqual(text.count("Dear "), 1); self.assertIn("I like databases.", text)
+        self.assertIn("role at Mercury. I like databases.", text)                                              # same company: the sentence is untouched
+        self.assertFalse(any(isinstance(c, str) and c.startswith("Removed") for c in self.run_it("Dear Team,\n\nI am applying for the Dev role at Mercury.\n\nSincerely,\nJane Doe")[3]))

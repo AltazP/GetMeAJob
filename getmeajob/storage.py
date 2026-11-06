@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -21,8 +22,29 @@ def canonical_url(url: str) -> str:
     return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, urlencode(sorted(query)), ""))
 
 
+ATS_URLS = (
+    ("greenhouse", re.compile(r"^https://(?:job-)?boards\.greenhouse\.io/(?:embed/job_app\?for=([^&/]+)&token=(\d+)|([^/?]+)/jobs/(\d+))")),
+    ("lever", re.compile(r"^https://jobs\.(?:eu\.)?lever\.co/([^/?]+)/([0-9a-fA-F-]{36})")),
+    ("ashby", re.compile(r"^https://jobs\.ashbyhq\.com/([^/?]+)/([0-9a-fA-F-]{36})")),
+)
+
+
+def ats_key(job: Job) -> str | None:
+    """Same Greenhouse/Lever/Ashby posting, wherever it was listed (API, community list, company page)."""
+    if job.source in {"greenhouse", "lever", "ashby"}:
+        return f"ats:{job.source}:{job.board.split(':')[-1].casefold()}:{job.source_id.casefold()}"
+    for provider, pattern in ATS_URLS:
+        found = pattern.match(job.application_url)
+        if found:
+            groups = [g for g in found.groups() if g]
+            return f"ats:{provider}:{groups[0].casefold()}:{groups[1].casefold()}"
+    return None
+
+
 def identity_keys(job: Job) -> list[str]:
     keys = ["url:" + canonical_url(job.application_url)]
+    if ats_key(job):
+        keys.append(ats_key(job))
     if job.original_url:
         keys.append("url:" + canonical_url(job.original_url))
     # Exact content identity only; equal titles alone can be different requisitions.

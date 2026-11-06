@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+from datetime import date
 import re
 import sqlite3
 from pathlib import Path
@@ -209,7 +210,7 @@ def job_by_id(path: Path, identity: int):
     if not path.exists(): raise ValueError('Job not found.')
     db=sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)
     try:
-        row=db.execute('SELECT payload,last_checked FROM observations WHERE job_id=? ORDER BY last_checked DESC,rowid DESC LIMIT 1',(identity,)).fetchone()
+        row=db.execute("SELECT payload,last_checked FROM observations WHERE job_id=? ORDER BY CASE WHEN source IN ('greenhouse','lever','ashby') THEN 0 ELSE 1 END,last_checked DESC,rowid DESC LIMIT 1",(identity,)).fetchone()
         if not row: raise ValueError('Job not found.')
         return Job.from_dict(json.loads(row[0])),row[1]
     finally: db.close()
@@ -256,12 +257,29 @@ def _article(word):
     return 'an' if word[:1].casefold() in 'aeiou' else 'a'
 
 
+def _clean_title(text):
+    """Drop a trailing 'City, ST' that a parser sometimes leaves attached to a job title.
+
+    Only a city we know (offline Canadian list or common US cities) is removed, so real title words are never cut.
+    """
+    from getmeajob.locations import DEFAULT_PLACES
+    from getmeajob.regions import CITIES
+    text=_clause(text)
+    known={p.city.casefold() for p in DEFAULT_PLACES}|{c.casefold() for c in CITIES}
+    match=re.search(r"\s+((?:[A-Z][\w.'-]*\s)?[A-Z][\w.'-]*),\s*[A-Z]{2}$",text)
+    if not match: return text
+    city=match.group(1)
+    for candidate in (city,city.split()[-1]):
+        if candidate.casefold() in known: return text[:text.rindex(candidate)].rstrip()
+    return text
+
+
 def _experience_sentence(fact,wanted,title_words,job_tokens):
     from getmeajob.resume.vocabulary import find_terms
     record=fact.get('structure')
     if not record:
         return 'My experience includes '+_clause(fact['value'].split('\n')[0])[:260]+'.'
-    title,company=_clause(record.get('title','')),_clause(record.get('employer',''))
+    title,company=_clean_title(record.get('title','')),_clause(record.get('employer',''))
     lead=(f'In my role as {_article(title)} {title} at {company}' if title and company else f'At {company}' if company else f'In my role as {_article(title)} {title}' if title else 'In a previous role')
     bullets=sorted((_clause(b) for b in record.get('achievements',[]) if _clause(b)),key=lambda b:-_relevance(b,wanted,title_words,job_tokens))
     if not bullets: return lead+'.'
@@ -331,6 +349,11 @@ def letter(job,facts,model=None,name=None):
 PLACEHOLDER=re.compile(r'(?:\[|\{\{|<)\s*(company(?: name)?|employer|organi[sz]ation|hiring manager|role|position|job title|title)\s*(?:\]|\}\}|>)',re.I)
 SIGNOFF=re.compile(r'^\s*(sincerely|best regards|kind regards|warm regards|regards|respectfully|yours (?:truly|sincerely|faithfully)|best|thank you|thanks),?\s*$',re.I)
 GREETING=re.compile(r'^\s*(dear|hello|hi|to whom)\b',re.I)
+GREETING_ANY=re.compile(r'(?:^|(?<=\s))((?:Dear|Hello|Hi)\s[^,\n]{0,70},)\s*')
+DATE=re.compile(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b')
+APPLY_SENTENCE=re.compile(r"\b(?P<lead>(?:applying|apply|application|interest)\s+(?:for|to|in)\s+the)\s+(?P<role>[^.,\n]{3,90}?)\s+(?P<kind>role|position|internship|co-?op|opportunity)\s+at\s+(?P<company>[A-Z][\w&'’-]*(?:\.\w[\w&'’-]*)*(?:\s+[A-Z][\w&'’-]*(?:\.\w[\w&'’-]*)*){0,3})")
+FOLLOW_UP=re.compile(r"\s*(?:The idea|This|That|It|Its|Their|These|Those|They)\b")
+SENTENCE_BREAK=re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
 HEDGE=re.compile(r'\bI (?:believe|feel|think|hope) (?:that )?I (am|have|would|can|will|could)\b')
 FILLER=(('team player','a concrete example of teamwork'),('hard-?working','a result that shows your effort'),('self-starter','an example of something you started yourself'),
         ('go-getter','a specific achievement'),('passionate about','a specific reason you care about'),('perfect fit|ideal candidate|great fit','evidence of fit'),
@@ -348,7 +371,8 @@ def adapt_letter(template,job,facts,model=None,name=None):
     Returns (text, fact_ids, mode, changes, suggestions).
     """
     sel=_selection(job,facts,model)
-    text=re.sub(r'\r\n?','\n',template).strip()
+    from getmeajob.resume.reflow import reflow
+    text=reflow(template)   # repairs letters whose PDF text came out one word per line
     if not text: raise ValueError('The uploaded letter is empty.')
     changes,suggestions=[],[]
     def fill(match):
@@ -362,31 +386,70 @@ def adapt_letter(template,job,facts,model=None,name=None):
     squeezed=re.sub(r'[ \t]{2,}',' ',re.sub(r'\n{3,}','\n\n',text))
     if squeezed!=text: changes.append('Cleaned up extra spaces and blank lines.'); text=squeezed
     names_employer=job.employer.casefold() in text.casefold()   # before the greeting is added
-    lines=text.split('\n')
-    if lines and GREETING.match(lines[0]):
-        greeting=f'Dear {job.employer} Hiring Team,'
-        if lines[0].strip()!=greeting: changes.append(f'Changed the greeting to "{greeting}".')
-        lines[0]=greeting
-    else:
-        lines=[f'Dear {job.employer} Hiring Team,','']+lines; changes.append('Added a greeting addressed to the employer.')
+    # 1. Find the greeting wherever it is (PDF text often runs the address, date and "Dear ..." into one paragraph).
+    found=GREETING_ANY.search(text[:900])
+    header,body=(text[:found.start(1)].strip(),text[found.end():].strip()) if found else ('',text)
+    dropped=0
+    while True:
+        extra=re.match(r'\s*(?:Dear|Hello|Hi)\s[^,\n]{0,70},\s*',body)
+        if not extra: break
+        body=body[extra.end():]; dropped+=1
+    greeting=f'Dear {job.employer} Hiring Team,'
+    changes.append(f'Used one greeting, "{greeting}"'+(f' (your letter had {dropped+1}).' if dropped else '.'))
+    # 2. Put the address/date block on its own lines above the greeting, with today's date.
+    header_lines=[]
+    if header:
+        when=DATE.search(header)
+        today=date.today(); today_text=f"{today.strftime('%B')} {today.day}, {today.year}"
+        if when:
+            header_lines=[x for x in (header[:when.start()].strip(),today_text,header[when.end():].strip()) if x]
+            if when.group(0)!=today_text: changes.append(f'Updated the date from {when.group(0)} to today ({today_text}).')
+        else: header_lines=[header]
+        changes.append('Put your address and date on their own lines above the greeting.')
+    # 3. If the letter was written for another company, retarget the application sentence and drop sentences about the old one.
+    applying=APPLY_SENTENCE.search(body)
+    if applying and applying.group('company').casefold()!=job.employer.casefold():
+        old=applying.group('company').strip()
+        body=body[:applying.start()]+f"{applying.group('lead')} {job.role} {applying.group('kind')} at {job.employer}"+body[applying.end():]
+        changes.append(f'Changed the role and company where you apply from "{applying.group("role")} ... {old}" to {job.role} at {job.employer}.')
+        about_old=re.compile(rf"(?<!\w){re.escape(old)}(?!\w)")
+        removed=[]; fixed_paragraphs=[]
+        for paragraph in body.split('\n\n'):
+            kept=[]; skip_follow=False
+            for sentence in SENTENCE_BREAK.split(paragraph):
+                if skip_follow and FOLLOW_UP.match(sentence):
+                    removed.append(sentence); continue
+                skip_follow=False
+                if about_old.search(sentence):
+                    rewritten=re.sub(rf"{re.escape(old)}(?:['’]s)?(?:\s+[A-Z][\w-]*){{0,3}}\s+team",f"{job.employer}'s team",sentence)
+                    if not about_old.search(rewritten):
+                        kept.append(rewritten); continue
+                    removed.append(sentence); skip_follow=True; continue
+                kept.append(sentence)
+            if kept: fixed_paragraphs.append(' '.join(kept))
+        body='\n\n'.join(fixed_paragraphs)
+        if removed:
+            changes.append(f'Removed {len(removed)} sentence(s) that were specific to {old}, since they would be wrong for {job.employer}.')
+            suggestions.append(f'Removed because they were about {old}: '+' '.join(f'"{x[:140]}"' for x in removed)+f' Add a sentence about {job.employer} only if it is true.')
+    # 4. Sign-off with the applicant's name.
+    lines=body.split('\n')
     closing=next((i for i in range(len(lines)-1,-1,-1) if SIGNOFF.match(lines[i]) and len(lines)-i<=5),None)
     signed=name or '[Your name]'
     if closing is not None:
         if [x.strip() for x in lines[closing+1:] if x.strip()]!=[signed]: changes.append(f'Signed off with your name ({signed}).')
-        lines=lines[:closing+1]+[signed]
+        tail=[lines[closing].strip(),signed]; main=lines[:closing]
     else:
-        lines+=['','Sincerely,',signed]; changes.append(f'Added a sign-off with your name ({signed}).')
+        tail=['Sincerely,',signed]; main=lines; changes.append(f'Added a sign-off with your name ({signed}).')
     shared=[_pretty(t) for t in sel['shared']]
     args=(sel['wanted'],sel['title_words'],sel['job_tokens'])
     parts=[f"What draws me to the {job.role} role at {job.employer} is its focus on {_list(shared)}, which connects directly to my background." if shared
            else f"I am applying for the {job.role} role at {job.employer} and would like to highlight the experience most relevant to it."]
     if sel['experience']: parts.append(_experience_sentence(sel['experience'][0],*args))
     elif sel['projects']: parts.append('A project I would highlight: '+_clause(sel['projects'][0]['value'].split('\n')[0])[:240]+'.')
-    blocks='\n'.join(lines).split('\n\n')
-    insert_at=min(2,len(blocks)-1) if len(blocks)>2 else max(1,len(blocks)-1)
-    blocks.insert(insert_at,' '.join(parts))
+    paragraphs=[p.strip() for p in '\n'.join(main).split('\n\n') if p.strip()]
+    paragraphs.insert(min(1,len(paragraphs)),' '.join(parts))
     changes.append('Inserted a paragraph about this job that links it to your verified skills and experience (edit it freely).')
-    result='\n\n'.join(blocks)
+    result='\n\n'.join([*(['\n'.join(header_lines)] if header_lines else []),greeting,*paragraphs,'\n'.join(tail)])
     for pattern,advice in FILLER:
         found=re.search(pattern,template,re.I)
         if found: suggestions.append(f'"{found.group(0)}" is a generic phrase. Consider replacing it with {advice}.')

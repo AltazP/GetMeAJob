@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlsplit
 
 ALLOWED_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "jobs.eu.lever.co", "jobs.ashbyhq.com"}
 APPLICANT_FIELDS = {"first_name": 60, "last_name": 60, "email": 120, "phone": 40, "city": 80, "linkedin": 200, "website": 200}
@@ -122,8 +122,9 @@ def values_for(applicant: dict) -> dict:
     return values
 
 
-def fill_page(page, applicant: dict, resume_path: Path, letter_text: str, letter_pdf: Path | None) -> dict:
+def fill_page(page, applicant: dict, resume_path: Path, letter_text: str, letter_pdf: Path | None, url_ok=check_url) -> dict:
     """Fill the plain fields on the current page. Returns {'filled': [...], 'needs': [...]}. Never submits."""
+    guard(page, url_ok)
     values = values_for(applicant)
     filled, files = [], [f for f in page.evaluate(COLLECT) if f["type"] == "file"]
     only_one_file = len(files) == 1
@@ -131,6 +132,7 @@ def fill_page(page, applicant: dict, resume_path: Path, letter_text: str, letter
         key = field_key(field)
         if key is None or field["value"] or (not field["visible"] and field["type"] != "file"):
             continue
+        guard(page, url_ok)   # a late redirect must never receive personal data
         target = page.locator(f'[data-gmj="{field["i"]}"]')
         try:
             if key in ("resume_file", "file_unlabeled"):
@@ -155,15 +157,194 @@ def fill_page(page, applicant: dict, resume_path: Path, letter_text: str, letter
     return {"filled": filled, "needs": needs}
 
 
-def open_form_if_needed(page) -> None:
-    """Some job pages show the description first; click only a plain 'Apply' link, never anything that submits."""
-    if any(f["type"] in ("text", "email") and f["visible"] for f in page.evaluate(COLLECT)):
+# While we fill, nothing on the page may submit the form: uploads and typing fire the page's own handlers
+# (change/input), and a hostile or sloppy page could submit from one. The block is lifted at human handoff.
+BLOCK_SUBMIT = """(() => {
+  window.__gmjBlock = true; window.__gmjBlocked = 0;
+  const hit = () => { window.__gmjBlocked += 1; };
+  // The block ends only when a real person interacts (a trusted pointer/key event), never on a timer or a script event.
+  const release = e => { if (e.isTrusted && window.__gmjBlock) { window.__gmjBlock = false; } };   // soft, page-visible layer only
+  for (const type of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(type, release, true);
+  window.addEventListener('submit', e => { if (window.__gmjBlock) { e.preventDefault(); e.stopImmediatePropagation(); hit(); } }, true);
+  for (const name of ['submit', 'requestSubmit']) {
+    const original = HTMLFormElement.prototype[name];
+    HTMLFormElement.prototype[name] = function (...args) { if (window.__gmjBlock) { hit(); return; } return original.apply(this, args); };
+  }
+})()"""
+SUBMIT_REQUEST = re.compile(r"(?i)(?:/|=)(?:apply|applications?|submit\w*|apisubmit\w*)(?:[/?&]|$)")
+MUTATIONS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+UPLOAD_HANDLE_OPERATION = re.compile(r"^(?:Api)?Create\w*(?:Upload|File)\w*Handle$")
+SUBMIT_WORDS = re.compile(r"(?i)submit|createapplication|applyfor")
+
+
+def graphql_read_or_upload(request) -> bool:
+    """True only when EVERY operation in the request is a read, or an explicit 'create upload handle' mutation.
+
+    Single-page sites such as Ashby load their forms with GraphQL reads sent as POST. Any other mutation, any
+    submit-style operation name, an unparseable body that mentions a mutation, and any batch containing one bad
+    operation are refused. (If a site names its upload operation differently, the file simply fails to attach and is
+    left for the person; that is the safe direction.)
+    """
+    parts = urlsplit(request.url)
+    if "graphql" not in parts.path.lower():
+        return False
+    body = request.post_data or ""
+    url_names = parse_qs(parts.query).get("op", [])
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return not re.search(r"(?i)\bmutation\b", body) and not any(SUBMIT_WORDS.search(n) for n in url_names)
+    for item in data if isinstance(data, list) else [data]:
+        if not isinstance(item, dict):
+            return False
+        name = str(item.get("operationName") or (url_names[0] if len(url_names) == 1 else ""))
+        query = str(item.get("query") or "")
+        if re.search(r"(?i)\bmutation\b", query):
+            if not UPLOAD_HANDLE_OPERATION.fullmatch(name) or SUBMIT_WORDS.search(query):
+                return False
+        elif SUBMIT_WORDS.search(name):
+            return False
+    return True
+# While filling, every write request is refused except these reviewed kinds: uploads on the same site,
+# presigned uploads to cloud storage, and the CAPTCHA widget (which the person solves).
+UPLOAD_PATH = re.compile(r"(?i)upload|presign|attachment|resume|\bparse\b")
+STORAGE_HOSTS = (".amazonaws.com", "storage.googleapis.com")
+CAPTCHA_HOSTS = {"www.google.com", "www.recaptcha.net"}
+
+
+def captcha_traffic(request, same_site: bool) -> bool:
+    """CAPTCHA and bot-check plumbing (reCAPTCHA, hCaptcha, Cloudflare). It carries no personal data and the person still
+    solves the CAPTCHA, but blocking it can stop the widget from starting, so it passes through untouched."""
+    target = urlsplit(request.url); host = target.hostname or ""
+    return ((host in CAPTCHA_HOSTS and "/recaptcha/" in target.path) or host == "hcaptcha.com" or host.endswith(".hcaptcha.com")
+            or host == "challenges.cloudflare.com" or (same_site and target.path.startswith("/cdn-cgi/")))
+
+
+GESTURE_JS = """(() => {
+  const go = e => { if (e.isTrusted && typeof gmjRelease === 'function') gmjRelease('1'); };
+  for (const type of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(type, go, true);
+})()"""
+
+
+def watch_for_person(page, state: dict) -> None:
+    """Tell Python when a real person first touches the page.
+
+    The listener runs in a Chrome *isolated world*: it sees genuine (trusted) clicks and keys, but the page's own scripts can
+    neither see it nor call the binding, so a page cannot lift the request guard itself. Lifting the page-visible submit
+    block (BLOCK_SUBMIT) is only a soft layer; this is the hard one.
+    """
+    session = page.context.new_cdp_session(page)
+    session.on("Runtime.bindingCalled", lambda event: state.update(released=True) if event.get("name") == "gmjRelease" else None)
+    session.send("Page.enable"); session.send("Runtime.enable")
+    session.send("Page.addScriptToEvaluateOnNewDocument", {"source": GESTURE_JS, "worldName": "gmj-isolated"})
+    session.send("Runtime.addBinding", {"name": "gmjRelease", "executionContextName": "gmj-isolated"})
+
+
+def block_submission(page) -> None:
+    page.add_init_script(BLOCK_SUBMIT)
+
+
+def stopped_submissions(page) -> int:
+    """How many submission attempts the page made (and we stopped) while filling. Does not lift the block."""
+    try:
+        return int(page.evaluate("() => window.__gmjBlocked || 0"))
+    except Exception:
+        return 0
+
+
+class UnsafeDestination(ValueError):
+    """The browser ended up somewhere other than a supported application page; nothing was filled."""
+
+
+FORM_CONTROLS = {"text", "email", "tel", "file", "textarea", "select", "url", "number", "search", "password"}
+LINKS = """() => [...document.querySelectorAll('a[href]')].filter(a => !a.closest('form')).map(a => ({text: (a.innerText || a.getAttribute('aria-label') || '').trim(), href: a.href}))"""
+
+
+def guard(page, url_ok=check_url) -> None:
+    """Raise unless the page is currently on a supported application address (checked before every fill/upload)."""
+    try:
+        url_ok(page.url)
+    except ValueError:
+        raise UnsafeDestination("The browser left the supported application sites, so nothing was filled.") from None
+
+
+def open_form_if_needed(page, url_ok=check_url) -> None:
+    """Some job pages show the description first. Follow a plain 'Apply' LINK to a supported address.
+
+    Nothing is ever clicked: a button (possibly a submit button) is never used, and a link is followed
+    by navigating to its already-validated address. A page that already has form controls is left alone.
+    """
+    if any(f["type"] in FORM_CONTROLS or f["tag"] in ("textarea", "select") for f in page.evaluate(COLLECT)):
         return
-    for role in ("link", "button"):
-        candidate = page.get_by_role(role, name=APPLY_BUTTON)
-        if candidate.count():
-            candidate.first.click(); page.wait_for_load_state("domcontentloaded"); page.wait_for_timeout(1500)
+    for link in page.evaluate(LINKS):
+        if APPLY_BUTTON.match(link["text"] or ""):
+            try:
+                target = url_ok(link["href"])
+            except ValueError:
+                continue   # an Apply link to an unsupported site: leave it for the person
+            page.goto(target, wait_until="domcontentloaded", timeout=45000); page.wait_for_timeout(1500)
             return
+
+
+def navigation_guard(page, url_ok=check_url):
+    """Stop the page from reaching an unsupported address, or submitting, while we work.
+
+    - Top-level page loads are fetched without following redirects and every hop is validated before the browser follows it.
+    - Every write request is refused unless it is a reviewed upload kind; permitted uploads are also fetched without
+      following redirects, so an upload endpoint cannot forward data elsewhere.
+    - The guard stays on until the person's first real click or keypress (seen from an isolated world the page cannot reach),
+      so neither a delayed script nor a hostile page can lift it. `remove()` lifts it explicitly (tests, cleanup).
+    """
+    blocked: list[str] = []
+    state = {"released": False}
+    watch_for_person(page, state)
+
+    def handle(route):
+        request = route.request
+        if state["released"]:
+            route.continue_(); return
+        permitted_write = False
+        if request.method in MUTATIONS:
+            target = urlsplit(request.url)
+            where = f"{target.path}?{target.query}"
+            same_site = target.netloc == urlsplit(page.url).netloc
+            navigation = request.is_navigation_request() and request.frame == page.main_frame
+            if not navigation and ((same_site and graphql_read_or_upload(request)) or captcha_traffic(request, same_site)):
+                route.continue_(); return
+            permitted_write = not navigation and not SUBMIT_REQUEST.search(where) and (
+                (same_site and UPLOAD_PATH.search(where)) or (target.hostname or "").endswith(STORAGE_HOSTS))
+            if not permitted_write:
+                # Same-site or native-form attempts are reported to the person; third-party analytics blocks stay silent.
+                blocked.append(f"{request.method} {target.path}" if same_site or navigation else f"third-party {request.method} {target.hostname}")
+                route.abort(); return
+        if not permitted_write and not (request.is_navigation_request() and request.frame == page.main_frame):
+            route.continue_(); return
+        try:
+            if not permitted_write:
+                url_ok(request.url)
+            response = route.fetch(max_redirects=0)
+            location = response.headers.get("location")
+            if 300 <= response.status < 400 and location:
+                if permitted_write:
+                    raise ValueError("an upload endpoint answered with a redirect")
+                url_ok(urljoin(request.url, location))
+        except Exception:   # unsupported address, redirecting upload, network error or anything unexpected: do not load it
+            blocked.append(request.url if not permitted_write else f"redirecting upload {urlsplit(request.url).path}")
+            route.abort(); return
+        route.fulfill(response=response)
+    page.route("**/*", handle)
+
+    def remove():
+        state["released"] = True
+        try:
+            page.unroute("**/*", handle)
+        except Exception:
+            pass
+    remove.blocked = blocked
+    remove.state = state
+    return remove
 
 
 def banner(page, report: dict) -> None:
@@ -185,7 +366,7 @@ def prepare(store, package_id: int) -> dict:
     return {"package": package, "applicant": validate_applicant(json.loads(applicant)), "url": url}
 
 
-def assist(store, package_id: int, headless: bool = False, wait: bool = True, playwright_factory=None) -> dict:
+def assist(store, package_id: int, headless: bool = False, wait: bool = True, playwright_factory=None, url_ok=check_url) -> dict:
     ready = prepare(store, package_id)
     package, applicant = ready["package"], ready["applicant"]
     resume = store.resume(package["resume_id"])
@@ -199,25 +380,47 @@ def assist(store, package_id: int, headless: bool = False, wait: bool = True, pl
         letter_pdf = folder / "Cover Letter.pdf"; letter_pdf.write_bytes(export(package["letter"], "pdf")[0])
         with playwright_factory() as playwright:
             browser = playwright.chromium.launch(channel="chrome", headless=headless)
-            page = browser.new_page()
-            page.goto(ready["url"], wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(1500)
-            open_form_if_needed(page)
-            report = fill_page(page, applicant, resume_path, package["letter"], letter_pdf)
-            banner(page, report)
-            store.add_application(package_id, package["job_id"], "form_opened", report["filled"], report["needs"])
-            if wait:
+            try:
+                page = browser.new_page()
+                block_submission(page)
+                remove_guard = navigation_guard(page, url_ok)
                 try:
-                    while not page.is_closed():
-                        page.wait_for_timeout(1000)
+                    page.goto(ready["url"], wait_until="domcontentloaded", timeout=45000)
+                    page.wait_for_timeout(1500)
+                    guard(page, url_ok)
+                    open_form_if_needed(page, url_ok)
+                    guard(page, url_ok)
+                    report = fill_page(page, applicant, resume_path, package["letter"], letter_pdf, url_ok)
+                except UnsafeDestination as exc:
+                    store.add_application(package_id, package["job_id"], "blocked", [], [str(exc)])
+                    raise
                 except Exception:
-                    pass   # the window was closed
-            browser.close()
+                    if any(item.startswith("http") for item in remove_guard.blocked):   # our guard stopped a navigation, which surfaces as a browser error
+                        reason = "The page tried to leave the supported application sites, so nothing was filled."
+                        store.add_application(package_id, package["job_id"], "blocked", [], [reason])
+                        raise UnsafeDestination(reason) from None
+                    raise
+                stopped = stopped_submissions(page) + sum(1 for item in remove_guard.blocked if not item.startswith(("http", "third-party")))
+                if stopped:
+                    report["needs"].append("A script on the page tried to submit the form while it was being filled; that was blocked. Review the whole form before you submit.")
+                banner(page, report)
+                store.add_application(package_id, package["job_id"], "form_opened", report["filled"], report["needs"])
+                if wait:
+                    try:
+                        while not page.is_closed():
+                            page.wait_for_timeout(1000)
+                    except Exception:
+                        pass   # the window was closed
+            finally:
+                browser.close()
     return report
 
 
 def spawn(private_dir: Path, package_id: int, root: Path) -> None:
     """Start the assistant in its own process so the web page returns immediately."""
-    log = open(root / "data" / "assist.log", "ab") if (root / "data").is_dir() else subprocess.DEVNULL
-    subprocess.Popen([sys.executable, "-m", "getmeajob", "assist", "--package", str(int(package_id)), "--private", str(Path(private_dir).resolve())],
-                     cwd=root, stdout=log, stderr=log, start_new_session=True)
+    argv = [sys.executable, "-m", "getmeajob", "assist", "--package", str(int(package_id)), "--private", str(Path(private_dir).resolve())]
+    if (root / "data").is_dir():
+        with open(root / "data" / "assist.log", "ab") as log:   # the child keeps its own copy; the parent must not leak the handle
+            subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, start_new_session=True)
+    else:
+        subprocess.Popen(argv, cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

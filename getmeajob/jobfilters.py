@@ -24,7 +24,7 @@ REGION_CODES = {"canada": ("canada",), "us": ("us",), "both": ("canada", "us"), 
 SORTS = {"match": "Highest match", "recent": "Most recent", "company": "Company", "title": "Job title"}
 MAX_ITEMS, MAX_TEXT = 15, 60
 FIELD_KEYS = ("applied", "q", "field", "role", "exclude", "type", "arrangement", "level", "city", "province", "radius",
-              "remote_region", "unplaced", "canada", "region", "salary", "currency", "interval", "posted", "company", "exclude_company", "min_score", "sort", "unknown")
+              "remote_region", "unplaced", "canada", "region", "closed", "salary", "currency", "interval", "posted", "company", "exclude_company", "min_score", "sort", "unknown")
 
 
 class FilterError(ValueError):
@@ -59,6 +59,7 @@ class JobFilters:
     radius_km: float = 100.0
     remote_in_region: bool = False
     include_unplaced: bool = False
+    show_closed: bool = False
     minimum_salary: float | None = None
     currency: str = "CAD"
     interval: str = "year"
@@ -153,6 +154,7 @@ def parse(data) -> JobFilters:
         city=text("city"), province=province or "", radius_km=radius if radius is not None else 100.0,
         remote_in_region=str(one("remote_region")) in ("1", "true", "True"),
         include_unplaced=str(one("unplaced")) in ("1", "true", "True"),
+        show_closed=str(one("closed")) in ("1", "true", "True"),
         minimum_salary=number(one("salary"), "Minimum salary", 0, 10_000_000), currency=currency, interval=interval,
         posted_days=posted, companies=lines("company", r"[\n;]"), excluded_companies=lines("exclude_company", r"[\n;]"),
         minimum_score=int(score or 0), sort=sort, include_unknown=str(unknown) not in ("0", "false", "False"),
@@ -195,6 +197,8 @@ def to_query(filters: JobFilters) -> dict:
         out["remote_region"] = "1"
     if filters.include_unplaced:
         out["unplaced"] = "1"
+    if filters.show_closed:
+        out["closed"] = "1"
     if filters.minimum_salary is not None:
         out["salary"] = f"{filters.minimum_salary:g}"
         out["currency"], out["interval"] = filters.currency, filters.interval
@@ -294,5 +298,6 @@ def chips(filters: JobFilters) -> list[str]:
     if filters.posted_days is not None: out.append("Posted: " + POSTED[filters.posted_days])
     if filters.companies: out.append("Companies: " + ", ".join(filters.companies))
     if filters.excluded_companies: out.append("Excluding companies: " + ", ".join(filters.excluded_companies))
+    if filters.show_closed: out.append("Including closed / no longer listed jobs")
     if filters.minimum_score: out.append(f"Match ≥ {filters.minimum_score}%")
     return out

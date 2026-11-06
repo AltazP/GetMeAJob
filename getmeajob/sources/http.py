@@ -1,5 +1,6 @@
 """Paced, bounded public GET requests with persistent host pauses and request budgets."""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException
@@ -47,6 +48,14 @@ def retry_seconds(value: str | None, default: float = 3600) -> float:
             except (ValueError, TypeError):
                 pass
     return default
+
+
+@dataclass(frozen=True)
+class Probe:
+    """One GET answered as-is: status, redirect target (never followed) and a size-capped body."""
+    status: int
+    location: str | None
+    body: bytes
 
 
 class JsonClient:
@@ -124,6 +133,45 @@ class JsonClient:
                     continue
                 raise SourceError("Network request failed after three attempts; check connectivity and TLS certificates.") from exc
         raise SourceError("Request failed.")
+
+    def probe(self, url: str, *, page_hosts: tuple[str, ...], max_bytes: int = 1024 * 1024,
+              accept: str = "application/json,text/html;q=0.8") -> Probe:
+        """A single paced, budgeted GET that reports 3xx/4xx/5xx instead of raising, and never follows redirects.
+
+        Used to ask whether a posting still exists. Access denials (401/403/429) pause the host exactly as read() does.
+        """
+        url = public_url(url)
+        host = urlsplit(url).hostname
+        if host not in self.HOSTS | set(page_hosts):
+            raise SourceError("Only supported public HTTPS hosts or explicitly permitted page hosts are allowed.")
+        if host in self.blocked_hosts or (self.state and self.state.paused(host)):
+            raise SourceError("Host paused after rate limiting or access denial; retry after the persisted pause.")
+        self._budget(host)
+        wait = self.interval - (self.clock() - self.last_request.get(host, float("-inf")))
+        if wait > 0:
+            self.sleep(wait)
+        self.last_request[host] = self.clock()
+        request = Request(url, headers={"Accept": accept, "User-Agent": "GetMeAJob/0.2.5 (checking whether a saved posting is still open)"})
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                raw = response.read(max_bytes + 1)
+                if len(raw) > max_bytes:
+                    raise SourceError("Response exceeded the safe size limit.")
+                return Probe(int(getattr(response, "status", 200) or 200), None, raw)
+        except HTTPError as exc:
+            retry = exc.headers.get("Retry-After") if exc.headers else None
+            if exc.code in (401, 403, 429):
+                self._pause(host, retry_seconds(retry, 86400 if exc.code in (401, 403) else 3600))
+            try:
+                body = exc.read(max_bytes) if exc.fp else b""
+            except (OSError, ValueError):
+                body = b""
+            return Probe(exc.code, exc.headers.get("Location") if exc.headers else None, body)
+        except (URLError, TimeoutError, OSError, HTTPException) as exc:
+            reason = exc.reason if isinstance(exc, URLError) else exc
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                raise SourceError("TLS certificate verification failed; verification remains enabled.") from exc
+            raise SourceError("Network request failed.") from exc
 
     def get(self, url: str):
         if self.memoize and url in self.memo:

@@ -17,7 +17,8 @@ from getmeajob.resume.store import ProfileStore, CATEGORIES
 from getmeajob.resume.extract import extract, MAX_FILE
 from getmeajob.resume.parser import parse, GROUPS
 from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, adapt_letter, weights, stored_weights, DEFAULT_WEIGHTS
-from getmeajob import apply_assist, jobfilters, jobsquery, notify
+from getmeajob import apply_assist, jobfilters, jobsquery, notify, openness
+from starlette.concurrency import run_in_threadpool
 from getmeajob.classify import FIELDS, LEVELS
 from getmeajob.locations import PROVINCES
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
     app.state.store=store; app.state.bootstrap=secrets.token_urlsafe(32)
     sessions={}; attempts=[]
     templates=Environment(loader=FileSystemLoader(Path(__file__).parent/'templates'),autoescape=select_autoescape(['html']))
+    from getmeajob.sources.leadlists import LABELS as LEAD_LABELS
+    templates.filters['source_label']=lambda name: LEAD_LABELS.get(name,str(name).title())
     origin=f'http://127.0.0.1:{port}'
 
     def page(request,title,status_code=200,**context):
@@ -252,7 +255,7 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
                 try: apply_assist.apply_url(row.job.to_dict()); can_fill=True
                 except ValueError: can_fill=False
                 items.append({'id':row.id,'job':row.job,'link':notify.safe_link(row.job.original_url,row.job.application_url),'can_fill':can_fill,'checked':row.checked,'resume':resume,'match':m,'score':row.score,
-                    'field':row.field,'field_reason':row.field_reason,'level':row.level,'level_reason':row.level_reason,'is_new':row.is_new})
+                    'field':row.field,'field_reason':row.field_reason,'level':row.level,'level_reason':row.level_reason,'is_new':row.is_new,'open_check':row.open_check,'delisted':row.delisted})
             age=None
             if result.newest_check:
                 try: age=(datetime.now(timezone.utc)-datetime.fromisoformat(result.newest_check)).days
@@ -282,7 +285,7 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
                 except jobfilters.FilterError: filters=jobfilters.JobFilters()
         except jobfilters.FilterError as exc:
             error=str(exc); filters=jobfilters.JobFilters()
-        return jobs_page(request,filters,offset,error,view_dismissed=bool(hidden))
+        return await run_in_threadpool(jobs_page,request,filters,offset,error,200,bool(hidden))   # matching can take seconds; do not block other requests
 
     async def submitted_filters(request):
         form=await request.form()
@@ -340,6 +343,16 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
     async def delete_preset(request:Request):
         form=await request.form(); store.delete_preset(int(form['preset_id']))
         return RedirectResponse('/notifications',303)
+
+    @app.post('/jobs/{identity}/check')
+    async def check_open(request:Request,identity:int):
+        job,_=get_job(identity)
+        from getmeajob.sources.http import JsonClient, BudgetExceeded
+        checker=openness.Checker(JsonClient(interval=1.0,timeout=20,max_requests=12,per_host_limit=12,state=store))
+        try: await run_in_threadpool(openness.ensure_check,store,checker,identity,job.application_url,0)
+        except BudgetExceeded: pass
+        back=request.headers.get('referer','')
+        return RedirectResponse(back if back.startswith(origin+'/jobs') else '/jobs',303)
 
     @app.post('/jobs/dismiss')
     async def dismiss(request:Request):

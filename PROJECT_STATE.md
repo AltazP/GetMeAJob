@@ -15,7 +15,7 @@ and preview-confirm reprocessing into a new all-pending resume version. Existing
 resumes, verified facts, packages and jobs remain intact. No external application
 actions are implemented.
 
-Latest complete test run: 289 passed (172 earlier tests unchanged plus 117 new filter/classification/scoring/cache/page tests), 0 failed (November 5, 2026). The original 148
+Latest complete test run: 355 passed (172 earlier tests unchanged plus 183 new filter/classification/scoring/cache/page tests), 0 failed (November 5, 2026). The original 148
 tests are unchanged. Synthetic fixtures only; setup layout and PDF export visually
 checked. One test-only HTTPX deprecation warning remains; no runtime failure.
 
@@ -36,6 +36,10 @@ database (schema 3), Not interested, new-since-last-visit, source labels, stale 
 verified employer expansion (15,365 jobs from 89 boards). Details: docs/phase-3.md.
 
 Email-alert presets, launchd schedule and apply assistant (assistant/schedule uncommitted): see docs/phase-3.md. Gmail via Keychain, one digest per preset, no auto-apply.
+
+Latest (uncommitted): apply-assistant P1 safety fixes (no clicks, redirect guard, submission block), cover-letter text repair, community internship lists (leads fetch), rounder UI.
+
+Latest (uncommitted): ported closed-posting checker (is it still open), apply-assistant regression fix (GraphQL reads and CAPTCHA traffic allowed), hide closed/no-longer-listed jobs. See docs/phase-3.md.
 
 Earlier fix: matching jobs now reads one read-only SQLite page of 20 latest distinct
 jobs, then scores only that page. Search/order/count are server-side; stored jobs and

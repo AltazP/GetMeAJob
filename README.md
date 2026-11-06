@@ -319,3 +319,8 @@ launchd, permitted Playwright flows and free local AI where hardware supports it
   fills your Applicant details, resume and cover letter, and never submits; you press Submit yourself.
 
 Details and limits: docs/phase-3.md.
+
+- Community internship lists: `.venv/bin/python -m getmeajob leads fetch` adds postings from three public GitHub lists
+  (Simplify, Canadian Tech Internships, SpeedyApply); `schedule run` includes it. See docs/phase-3.md.
+- Still open? Cards show whether a posting is open (checked from the employer's own API or page, respecting robots.txt),
+  closed ones are hidden, and Checked: 0 open, 0 closed (hidden from now on), 0 could not be confirmed. checks your top matches. See docs/phase-3.md.

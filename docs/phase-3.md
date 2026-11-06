@@ -279,6 +279,88 @@ Setup: `.venv/bin/pip install -r requirements-phase6.txt` (project-local), then 
 real career sites change, so expect some fields to be left for you. Forms with
 custom widgets (Workday etc.) are unsupported by design.
 
+## Apply assistant safety controls (reviewer findings fixed)
+
+- **No clicks.** The assistant never clicks anything. If a job page shows only a description it follows a plain
+  "Apply" *link* (outside any form) by navigating to its address, and only when that address is on a supported
+  host. Buttons are never used, so a submit button can never be pressed. A page that already has form controls
+  is left alone.
+- **Destination checks.** Redirects are checked hop by hop (the page is fetched without following redirects and
+  each `Location` is validated before the browser follows it); the page address is re-checked before every fill
+  and upload. If the browser ends up anywhere unsupported nothing is filled, the browser closes and the package
+  page shows **Blocked for safety** with the reason.
+- **No submission while filling.** Uploading or typing fires a page's own handlers, so until the hand-off native
+  `submit` events and `form.submit()/requestSubmit()` are blocked and **every write request (POST/PUT/PATCH/DELETE)
+  is refused by default**, including top-level form posts, generic endpoints and posts to other hosts. Only reviewed
+  kinds pass: upload-looking addresses on the same site (not submit-style ones such as `/apply`, `/applications`),
+  presigned uploads to Amazon S3 / Google Cloud Storage, and the reCAPTCHA widget. Same-site attempts are listed on the
+  package page; blocked third-party analytics are silent. The protection stays on until your first real click or keypress on the page (script-made events do not count; the click is seen from a Chrome isolated world that the page's own scripts cannot reach or call, so neither a delayed script nor a hostile page can lift the protection itself); after that you submit normally. Permitted uploads are fetched without following redirects, so an upload address cannot forward your file elsewhere.
+  Single-page sites (Ashby) load their forms with GraphQL reads sent as POST: those pass. Every operation in a GraphQL request is judged
+  by name and type; the only mutation allowed is an explicit *create upload handle* operation, never one merely containing the word file or upload,
+  and a batch with one bad operation is refused. Observed on real Ashby, Greenhouse and Lever pages (read-only): forms load fully and nothing is blocked
+  except third-party analytics. An earlier version blocked all writes and left Ashby forms empty (found in the assistant log); this is the fix.
+  Known limit: if a site uploads through an address that does not look like an upload, the file may fail to attach (it
+  is then left for you) rather than risk a submission.
+- Tested only on synthetic pages on 127.0.0.1 with a test-supplied allow-rule (never a real employer).
+
+## Community internship lists
+
+`leads fetch` (also part of `schedule run`) reads three public GitHub list files, one request each, through the
+same size-capped, paced, certificate-checked client as the job-board APIs (page host `raw.githubusercontent.com`):
+SimplifyJobs/Summer2027-Internships (`listings.json`), negarprh/Canadian-Tech-Internships-2027 and
+speedyapply/2027-SWE-College-Jobs (README tables). **None of the three repositories has a licence, so none of
+their code is used**; the parsers are original and read only the published list data (company, title, location,
+link, date). Closed or inactive rows are skipped. Postings link to each employer's own page (often Workday or
+other sites the assistant does not support) and show their source (for example "Simplify list"). They are leads
+and may already be closed. The data stays in your ignored `data/` database; do not redistribute it.
+
+```sh
+.venv/bin/python -m getmeajob leads fetch              # all three lists
+.venv/bin/python -m getmeajob leads fetch --list simplify
+.venv/bin/python -m getmeajob leads fetch --dry-run    # no network
+```
+
+The same Greenhouse/Lever/Ashby posting arriving from an API and from a list is stored once (identity by
+board and job ID). On a copy of the real database: 5,386 new postings (Simplify 4,901, SpeedyApply 445, Canadian list 40
+that Simplify did not already contain) and 592 jobs merged with existing ones; 1,518 employers; pages stayed at about
+1.6 to 2.0 s with about 21,000 jobs. List postings have no descriptions, so their match score is based on the title
+and your verified experience and is marked low-evidence. The lists are internships, mostly for summer 2027.
+
+## Is it still open? (ported closed-posting checker)
+
+Stored postings are never guaranteed open, so the app now checks. The decision rules come from
+`.github/scripts/check_closed_jobs.py` in negarprh/Canadian-Tech-Internships-2027, **adapted with the repository
+owner's permission as relayed by this project's user** (the repository itself has no licence file; keep
+the attribution in `getmeajob/openness.py` if you share the code). Their rules: report **CLOSED only on strong evidence**
+and otherwise UNKNOWN. Providers handled: Workday (its own job API), Greenhouse and SmartRecruiters APIs, Ashby page
+data, Phenom page data, Oracle Candidate Experience API, explicit "this job is closed" messages, and a redirect from a
+job page to the same ATS's search or landing page. The network layer is this project's, not theirs: paced and
+budgeted requests, certificate checks, public-IP pinning, **robots.txt is read first and a disallowed address is never
+fetched** (RBC, for example, blocks its job pages, so only its data API is used), redirects to another site are not
+followed, and a host that answers 401/403/429 is paused.
+
+- Dashboard: each card shows *Open when checked*, *Looks closed*, *Could not confirm* or *Not checked*, with a
+  **Check if still open** button (one posting, a few requests). Jobs that look closed are hidden unless you tick
+  **Include closed or no-longer-listed jobs**; a note says how many are hidden. A "closed" answer stops hiding after 30 days.
+- **No longer listed:** when a later refresh of the same employer board (or list) saw other jobs but not this one,
+  it is treated as closed and hidden (about 1% of your stored jobs).
+- Email digests check list-sourced postings before sending, drop the closed ones and mark the rest
+  "Confirmed open when checked" or "Could not confirm it is still open". Jobs that come from an employer's own board
+  are not re-checked because the refresh just listed them.
+- `.venv/bin/python -m getmeajob leads check --limit 40` checks your presets' top list-sourced matches ahead of time.
+- Results and request pauses live in your private database (schema 8: `open_checks`, `check_pauses`), never in the jobs database. A saved "closed" answer only counts while the posting's link is unchanged and the employer's board has not listed it again since.
+- Known limit: if a board's refresh succeeds but returns zero jobs, its old postings are not marked no-longer-listed (that needs stored refresh snapshots).
+- Not ported: the other repositories' code (Simplify's list maintainer and category rules, SpeedyApply's database
+  scripts, the Canadian list's work-term annotator) because they maintain the lists or serve their own sites rather than
+  help this app; the app keeps reading their published list files for postings.
+
+## Cover letter text repair
+
+Text extracted from a PDF sometimes has a blank line after every word. `getmeajob/resume/reflow.py` rebuilds
+greeting, paragraphs and sign-off (words and order unchanged), is applied when a letter is saved and before it is
+improved, and is idempotent. A job title that has a known city attached ("Software Developer Toronto, ON") has the city
+removed in generated sentences; fix any wrong employer/title in the resume review itself.
+
 ## Employer coverage
 
 `examples/employers.starter.csv` is a reviewed public list of about 150 candidate
@@ -331,6 +413,12 @@ experience, and signs with your name. The package page lists **what changed** an
 applied** (generic phrases such as "team player", length over about 420 words, leftover [brackets], a
 reminder to check for another company's name). It never adds a skill or experience that is not a
 verified fact. Review and edit before use.
+
+The improver also copes with letters pulled from a PDF: it finds the greeting even when the address and date are run
+into the same paragraph, keeps a single greeting, puts your address and today's date on their own lines above it, and
+if the letter was written for another company it changes the role and company in the sentence where you apply, rewrites
+"contribute to X's ... team" for the new employer, and removes sentences that name the old company (plus an immediate
+"The idea/This/It..." follow-up). Every removed sentence is listed under Suggestions so nothing is lost silently.
 
 ## Truthful letters and optional local AI
 
@@ -398,7 +486,7 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **289 passing tests, zero failures** (172 earlier tests are unchanged; 117 new ones cover filters, scoring, caches, email presets, the schedule and the apply assistant). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
+The full suite has **355 passing tests, zero failures** (172 earlier tests are unchanged; 183 new ones cover filters, scoring, caches, email presets, the schedule and the apply assistant). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
 Host/Origin checks, upload limits, session rotation/restart, login throttling, XSS

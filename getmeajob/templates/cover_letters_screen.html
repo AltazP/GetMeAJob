@@ -1,0 +1,12 @@
+<section><h2>My cover letters</h2>
+<p>Upload a letter you wrote (PDF, DOCX or TXT) or paste it. When you prepare a package you can choose <b>Improve and tailor my letter</b>: the app keeps your wording, fills in the company and role, tightens hedging phrases, adds one paragraph linking the job to your <i>verified</i> facts, signs with your name, and lists every change plus suggestions it did not apply. Or choose <b>Auto-generate</b> and it writes a new letter from your verified facts. You can edit either result before using it.</p>
+{% if error %}<p class="warning" role="alert">{{ error }}</p>{% endif %}
+<form action="/cover-letters" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>Name for this letter <input name="label" maxlength="80" placeholder="e.g. General software letter"></label>
+<label>File (PDF, DOCX or TXT) <input type="file" name="file" accept=".pdf,.docx,.txt"></label>
+<label>or paste the text<textarea name="text" rows="8" maxlength="20000"></textarea></label>
+<button>Save letter</button></form></section>
+{% for item in letters %}<article><h3>{{ item.label }}</h3><small>{{ item.filename }} · {{ item.created[:10] }} · {{ item.text|length }} characters</small>
+<details><summary>Show text</summary><pre>{{ item.text }}</pre></details>
+<form action="/cover-letters/{{ item.id }}/delete" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Delete this saved letter</button> <small>Does not affect your resumes or existing packages.</small></form></article>
+{% else %}<p>No saved letters yet.</p>{% endfor %}

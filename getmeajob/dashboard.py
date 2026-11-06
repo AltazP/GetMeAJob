@@ -16,7 +16,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from getmeajob.resume.store import ProfileStore, CATEGORIES
 from getmeajob.resume.extract import extract, MAX_FILE
 from getmeajob.resume.parser import parse, GROUPS
-from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, weights, stored_weights, DEFAULT_WEIGHTS
+from getmeajob.resume.intelligence import job_page, job_by_id, match, letter, adapt_letter, weights, stored_weights, DEFAULT_WEIGHTS
 from getmeajob import apply_assist, jobfilters, jobsquery, notify
 from getmeajob.classify import FIELDS, LEVELS
 from getmeajob.locations import PROVINCES
@@ -260,12 +260,12 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
             return page(request,'Matching stored jobs',status_code=status_code,screen='jobs',results=items,f=filters,error=error,
                 chips=jobfilters.chips(filters),notices=result.notices,total=result.total,offset=offset,stats=result,stale_days=age,
                 sort_queries={k:jobfilters.query_string(replace(filters,sort=k),0) for k in jobfilters.SORTS},
-                preset_json=jobfilters.dump_preferences(filters),
+                preset_json=jobfilters.dump_preferences(filters),saved_letters=[{'id':l['id'],'label':l['label']} for l in store.cover_letters()],
                 view_dismissed=view_dismissed,resumes_exist=bool(store.resumes()),
                 prev_query=jobfilters.query_string(filters,max(0,offset-20)),next_query=jobfilters.query_string(filters,offset+20),
                 options={'fields':FIELDS,'employment':jobfilters.EMPLOYMENT,'arrangements':jobfilters.ARRANGEMENTS,'levels':LEVELS,
                     'provinces':sorted(PROVINCES),'currencies':jobfilters.CURRENCIES,'intervals':jobfilters.INTERVALS,
-                    'posted':jobfilters.POSTED,'sorts':jobfilters.SORTS})
+                    'posted':jobfilters.POSTED,'sorts':jobfilters.SORTS,'regions':jobfilters.REGIONS})
         except (sqlite3.DatabaseError, OSError, KeyError, TypeError, json.JSONDecodeError):
             return page(request,'Stored jobs unavailable',status_code=503,screen='message',
                 message='Could not load stored jobs. The local database may be busy or contain an invalid posting. Please retry; no records were changed.')
@@ -355,11 +355,17 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         job,checked=get_job(job_id); resume=store.resume(resume_id); facts=store.facts(resume_id)
         configuration=load_weights()
         details=json.loads(store.get_setting('applicant','{}')); name=' '.join(x for x in (details.get('first_name'),details.get('last_name')) if x) or None
-        text,ids,mode=letter(job,facts,str(form.get('model','')) or None,name)
+        model=str(form.get('model','')) or None; source=str(form.get('letter_source','auto')); changes=suggestions=[]
+        if source.startswith('upload:'):
+            saved=store.cover_letter(int(source.split(':',1)[1]))
+            text,ids,mode,changes,suggestions=adapt_letter(saved['text'],job,facts,model,name)
+            mode=f"improved from your letter '{saved['label']}'"
+        elif source=='auto': text,ids,mode=letter(job,facts,model,name)
+        else: raise ValueError('Invalid cover letter choice.')
         payload={'employer':job.employer,'position':job.role,'original_url':job.original_url or job.application_url,
             'job':job.to_dict(),'job_last_checked':checked,'resume':{k:v for k,v in resume.items() if k!='content'},
             'match':match(job,facts,configuration),'verified_facts':[f for f in facts if f['status']=='verified'],
-            'letter_fact_ids':ids,'generation_mode':mode,'created':utc_now(),
+            'letter_fact_ids':ids,'generation_mode':mode,'letter_changes':changes,'letter_suggestions':suggestions,'created':utc_now(),
             'missing_information':['Applicant name/signature and contact details need review.','Application questions, eligibility and current vacancy status require review.'],
             'submission_authorized':False}
         identity=store.package(job_id,resume_id,payload,text)
@@ -372,6 +378,31 @@ def create_app(private=Path('private'), job_database=Path('data/jobs.sqlite3'), 
         return page(request,'Review application package',status_code=status_code,screen='package',package=package,can_assist=ready,
             posting_link=notify.safe_link(package['payload'].get('original_url'),(package['payload'].get('job') or {}).get('application_url')),
             assist_error=assist_error,applications=store.applications(identity))
+
+    def letters_page(request,error=None,status_code=200):
+        return page(request,'My cover letters',status_code=status_code,screen='cover_letters',letters=store.cover_letters(),error=error)
+
+    @app.get('/cover-letters')
+    async def cover_letters(request:Request): return letters_page(request)
+
+    @app.post('/cover-letters')
+    async def add_cover_letter(request:Request):
+        form=await request.form(); upload=form.get('file'); text=str(form.get('text','')); filename='pasted text'
+        try:
+            if upload is not None and hasattr(upload,'read') and getattr(upload,'filename',''):
+                data=await upload.read(MAX_FILE+1); filename=Path(upload.filename.replace('\\','/')).name[:120]
+                if filename.lower().endswith('.txt'):
+                    if len(data)>200000: raise ValueError('Text files up to 200 KB.')
+                    try: text=data.decode('utf-8')
+                    except UnicodeDecodeError: raise ValueError('Save the text file as UTF-8 and try again.') from None
+                else: text=extract(filename,data)
+            store.add_cover_letter(str(form.get('label') or filename),filename,text)
+        except ValueError as exc: return letters_page(request,str(exc),400)
+        return RedirectResponse('/cover-letters',303)
+
+    @app.post('/cover-letters/{identity}/delete')
+    async def delete_cover_letter(request:Request,identity:int):
+        store.delete_cover_letter(identity); return RedirectResponse('/cover-letters',303)
 
     @app.get('/applicant')
     async def applicant(request:Request):

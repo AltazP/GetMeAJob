@@ -315,6 +315,23 @@ relevant projects; education; a closing; and a sign-off with your name from Appl
 (`[Your name]` appears if none is saved). Skills the posting wants but your facts lack are never
 claimed. Review and edit every letter.
 
+## Regions, uploaded cover letters and the improver
+
+**Region** (Canada only by default) can be Canada, United States, both or anywhere. A location
+counts for a country only with explicit evidence (country words, state/province codes,
+well-known cities); ambiguous names such as a bare "London" count for neither, and "San
+Francisco, CA | Toronto, ON" is judged city by city. Rules: `getmeajob/regions.py`.
+
+**My cover letters** (nav bar) stores letters you upload (PDF, DOCX, TXT) or paste, privately in
+`private/profiles.sqlite3` (schema 6). When preparing a package choose **Auto-generate a new letter**
+or **Improve and tailor my letter**. The improver keeps your sentences and: fills [Company]/[Role]
+placeholders, names the employer in the greeting, tightens hedges ("I believe I" becomes "I"), cleans
+spacing, inserts one paragraph tying the job to your verified skills and most relevant verified
+experience, and signs with your name. The package page lists **what changed** and **suggestions not
+applied** (generic phrases such as "team player", length over about 420 words, leftover [brackets], a
+reminder to check for another company's name). It never adds a skill or experience that is not a
+verified fact. Review and edit before use.
+
 ## Truthful letters and optional local AI
 
 The default generator uses actual role/employer text and up to eight literal verified
@@ -381,7 +398,7 @@ DB in read-only mode and never migrates or replaces discovery records.
 
 ## Verification and delivery
 
-The full suite has **273 passing tests, zero failures** (172 earlier tests are unchanged; 101 new ones cover filters, scoring, caches, email presets, the schedule and the apply assistant). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
+The full suite has **289 passing tests, zero failures** (172 earlier tests are unchanged; 117 new ones cover filters, scoring, caches, email presets, the schedule and the apply assistant). Synthetic fixtures cover actual PDF/DOCX extraction, malformed files,
 ZIP traversal/external links, pending/verified/rejected facts, history/defaults,
 relevance/evidence, AI output constraints, package versions, authentication, CSRF,
 Host/Origin checks, upload limits, session rotation/restart, login throttling, XSS

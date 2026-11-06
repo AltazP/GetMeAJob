@@ -15,7 +15,7 @@ and preview-confirm reprocessing into a new all-pending resume version. Existing
 resumes, verified facts, packages and jobs remain intact. No external application
 actions are implemented.
 
-Latest complete test run: 273 passed (172 earlier tests unchanged plus 101 new filter/classification/scoring/cache/page tests), 0 failed (November 5, 2026). The original 148
+Latest complete test run: 289 passed (172 earlier tests unchanged plus 117 new filter/classification/scoring/cache/page tests), 0 failed (November 5, 2026). The original 148
 tests are unchanged. Synthetic fixtures only; setup layout and PDF export visually
 checked. One test-only HTTPX deprecation warning remains; no runtime failure.
 

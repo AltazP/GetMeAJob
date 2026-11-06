@@ -257,6 +257,7 @@ def _article(word):
 
 
 def _experience_sentence(fact,wanted,title_words,job_tokens):
+    from getmeajob.resume.vocabulary import find_terms
     record=fact.get('structure')
     if not record:
         return 'My experience includes '+_clause(fact['value'].split('\n')[0])[:260]+'.'
@@ -268,11 +269,14 @@ def _experience_sentence(fact,wanted,title_words,job_tokens):
     sentence=f'{lead}, I {_lower_first(first)}.' if _verb_led(first) else f'{lead}, my work included: {first}.'
     if len(bullets)>1 and _verb_led(bullets[1]) and _relevance(bullets[1],wanted,title_words,job_tokens)>0:
         sentence+=f' I also {_lower_first(bullets[1])}.'
+    # Bridge to the posting using only skills that appear in both this verified record and the posting.
+    used=[t for t in find_terms(fact['value']) if t in set(wanted)][:3]
+    if used: sentence+=f' That work drew on {_list([_pretty(t) for t in used])}, which this role also calls for.'
     return sentence
 
 
-def letter(job,facts,model=None,name=None):
-    """Truthful, job-specific letter built only from verified facts; wording around them is fixed templates."""
+def _selection(job,facts,model=None):
+    """Choose which verified facts to feature for a posting. Returns a dict used by letter() and adapt_letter()."""
     from getmeajob.resume.vocabulary import find_terms
     approved=[f for f in facts if f['status']=='verified' and f['category']!='personal']
     if not approved: raise ValueError('Verify at least one fact before generating a letter.')
@@ -291,26 +295,109 @@ def letter(job,facts,model=None,name=None):
     experience,projects,education=pick(('employment',),2),pick(('projects',),2),pick(('education','university','program','coursework'),1)
     prepared_terms=set(find_terms(' '.join(f['value'] for f in approved)))
     shared=[t for t in wanted if t in prepared_terms][:4]
+    skills=[_clause(f['value']) for f in ranked if f['category'] in ('skills','tools')][:3]
+    used=[f['id'] for f in (*experience,*projects,*education)] or [f['id'] for f in ranked[:3]]
+    return dict(wanted=wanted,title_words=title_words,job_tokens=job_tokens,experience=experience,projects=projects,education=education,
+                shared=shared,skills=skills,ids=used,mode=mode)
+
+
+def letter(job,facts,model=None,name=None):
+    """Truthful, job-specific letter built only from verified facts; wording around them is fixed templates."""
+    sel=_selection(job,facts,model)
+    shared=[_pretty(t) for t in sel['shared']]
     seed=sum(map(ord,job.role+job.employer))%3
-    fit=(f"The focus on {_list([_pretty(t) for t in shared])} in this role connects directly to my background, and I would like to bring that experience to your team." if shared
+    fit=(f"The focus on {_list(shared)} in this role connects directly to my background, and I would like to bring that experience to your team." if shared
          else 'I would welcome the chance to bring my background to your team.')
     opening=(f"I am excited to apply for the {job.role} position at {job.employer}. {fit}",
              f"Please accept my application for the {job.role} role at {job.employer}. {fit}",
              f"I am writing to express my interest in the {job.role} opportunity at {job.employer}. {fit}")[seed]
     paragraphs=[opening]
-    if experience: paragraphs.append(' '.join(_experience_sentence(f,wanted,title_words,job_tokens) for f in experience))
-    if projects:
-        lines=[_clause(f['value'].split('\n')[0])[:240] for f in projects]
+    args=(sel['wanted'],sel['title_words'],sel['job_tokens'])
+    if sel['experience']: paragraphs.append(' '.join(_experience_sentence(f,*args) for f in sel['experience']))
+    if sel['projects']:
+        lines=[_clause(f['value'].split('\n')[0])[:240] for f in sel['projects']]
         paragraphs.append('Project work I would highlight: '+'; '.join(lines)+'.')
-    if education:
-        paragraphs.append('My education includes '+_clause(education[0]['value'].split('\n')[0])[:240]+'.')
-    if not (experience or projects or education):
-        skills=[_clause(f['value']) for f in ranked if f['category'] in ('skills','tools')][:3]
-        paragraphs.append('My background includes '+_list(skills)+'.' if skills else 'I have reviewed the requirements and would be glad to discuss my background.')
-    paragraphs.append(f"I would welcome the opportunity to discuss how I can contribute to {job.employer}. Thank you for your time and consideration.")
-    used=[f['id'] for f in (*experience,*projects,*education)] or [f['id'] for f in ranked[:3]]
+    if sel['education']:
+        paragraphs.append('My education includes '+_clause(sel['education'][0]['value'].split('\n')[0])[:240]+'.')
+    if not (sel['experience'] or sel['projects'] or sel['education']):
+        paragraphs.append('My background includes '+_list(sel['skills'])+'.' if sel['skills'] else 'I have reviewed the requirements and would be glad to discuss my background.')
+    close=(f"I would be glad to apply my {shared[0]} experience at {job.employer} and would welcome the opportunity to discuss the {job.role} role. Thank you for your time and consideration."
+           if shared else f"I would welcome the opportunity to discuss how I can contribute to {job.employer}. Thank you for your time and consideration.")
+    paragraphs.append(close)
     body='\n\n'.join(paragraphs)
-    return f"Dear {job.employer} Hiring Team,\n\n{body}\n\nSincerely,\n{name or '[Your name]'}",used,mode
+    return f"Dear {job.employer} Hiring Team,\n\n{body}\n\nSincerely,\n{name or '[Your name]'}",sel['ids'],sel['mode']
+
+
+PLACEHOLDER=re.compile(r'(?:\[|\{\{|<)\s*(company(?: name)?|employer|organi[sz]ation|hiring manager|role|position|job title|title)\s*(?:\]|\}\}|>)',re.I)
+SIGNOFF=re.compile(r'^\s*(sincerely|best regards|kind regards|warm regards|regards|respectfully|yours (?:truly|sincerely|faithfully)|best|thank you|thanks),?\s*$',re.I)
+GREETING=re.compile(r'^\s*(dear|hello|hi|to whom)\b',re.I)
+HEDGE=re.compile(r'\bI (?:believe|feel|think|hope) (?:that )?I (am|have|would|can|will|could)\b')
+FILLER=(('team player','a concrete example of teamwork'),('hard-?working','a result that shows your effort'),('self-starter','an example of something you started yourself'),
+        ('go-getter','a specific achievement'),('passionate about','a specific reason you care about'),('perfect fit|ideal candidate|great fit','evidence of fit'),
+        ('detail-oriented','an example where attention to detail mattered'),('fast learner|quick learner','something you learned quickly and what you did with it'),
+        ('thinking outside the box','a specific idea you came up with'),('results-driven|results-oriented','a measurable result'))
+
+
+def adapt_letter(template,job,facts,model=None,name=None):
+    """Improve and tailor the user's own uploaded letter for one posting. Their wording stays theirs.
+
+    Applied edits (all listed back to the user): placeholders filled, greeting names the employer,
+    a few hedging phrases tightened, one job-specific paragraph built from verified facts inserted
+    after the opening, and the sign-off carries the applicant's name. Anything judged weak but not
+    safe to rewrite automatically is returned as a suggestion instead.
+    Returns (text, fact_ids, mode, changes, suggestions).
+    """
+    sel=_selection(job,facts,model)
+    text=re.sub(r'\r\n?','\n',template).strip()
+    if not text: raise ValueError('The uploaded letter is empty.')
+    changes,suggestions=[],[]
+    def fill(match):
+        key=match.group(1).casefold()
+        return 'Hiring Team' if 'manager' in key else job.role if key in ('role','position','job title','title') else job.employer
+    filled=PLACEHOLDER.sub(fill,text)
+    if filled!=text: changes.append(f'Filled the company and role placeholders with {job.employer} and {job.role}.')
+    text=filled
+    tightened=HEDGE.sub(lambda m:'I '+m.group(1),text)
+    if tightened!=text: changes.append('Removed hedging such as "I believe I" so statements read with confidence.'); text=tightened
+    squeezed=re.sub(r'[ \t]{2,}',' ',re.sub(r'\n{3,}','\n\n',text))
+    if squeezed!=text: changes.append('Cleaned up extra spaces and blank lines.'); text=squeezed
+    names_employer=job.employer.casefold() in text.casefold()   # before the greeting is added
+    lines=text.split('\n')
+    if lines and GREETING.match(lines[0]):
+        greeting=f'Dear {job.employer} Hiring Team,'
+        if lines[0].strip()!=greeting: changes.append(f'Changed the greeting to "{greeting}".')
+        lines[0]=greeting
+    else:
+        lines=[f'Dear {job.employer} Hiring Team,','']+lines; changes.append('Added a greeting addressed to the employer.')
+    closing=next((i for i in range(len(lines)-1,-1,-1) if SIGNOFF.match(lines[i]) and len(lines)-i<=5),None)
+    signed=name or '[Your name]'
+    if closing is not None:
+        if [x.strip() for x in lines[closing+1:] if x.strip()]!=[signed]: changes.append(f'Signed off with your name ({signed}).')
+        lines=lines[:closing+1]+[signed]
+    else:
+        lines+=['','Sincerely,',signed]; changes.append(f'Added a sign-off with your name ({signed}).')
+    shared=[_pretty(t) for t in sel['shared']]
+    args=(sel['wanted'],sel['title_words'],sel['job_tokens'])
+    parts=[f"What draws me to the {job.role} role at {job.employer} is its focus on {_list(shared)}, which connects directly to my background." if shared
+           else f"I am applying for the {job.role} role at {job.employer} and would like to highlight the experience most relevant to it."]
+    if sel['experience']: parts.append(_experience_sentence(sel['experience'][0],*args))
+    elif sel['projects']: parts.append('A project I would highlight: '+_clause(sel['projects'][0]['value'].split('\n')[0])[:240]+'.')
+    blocks='\n'.join(lines).split('\n\n')
+    insert_at=min(2,len(blocks)-1) if len(blocks)>2 else max(1,len(blocks)-1)
+    blocks.insert(insert_at,' '.join(parts))
+    changes.append('Inserted a paragraph about this job that links it to your verified skills and experience (edit it freely).')
+    result='\n\n'.join(blocks)
+    for pattern,advice in FILLER:
+        found=re.search(pattern,template,re.I)
+        if found: suggestions.append(f'"{found.group(0)}" is a generic phrase. Consider replacing it with {advice}.')
+    words=len(result.split())
+    if words>420: suggestions.append(f'The letter is about {words} words. One page (roughly 250-400 words) is usually better; consider trimming.')
+    if not names_employer: suggestions.append(f'Your original letter never names {job.employer}; the new paragraph now does. Mention one specific thing about the company if you know it to be true.')
+    suggestions.append('Check that the letter does not mention a different company or role.')
+    left=sorted(set(re.findall(r'\[[^\]\n]{1,40}\]',result))-{'[Your name]'})
+    if left: suggestions.append('Fill in or remove: '+', '.join(left))
+    if '[Your name]' in result: suggestions.append('Save your name under Applicant details so the sign-off fills automatically.')
+    return result,sel['ids'],sel['mode'],changes,suggestions
 
 
 def local_order(values,model):

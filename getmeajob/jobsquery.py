@@ -13,10 +13,10 @@ import json
 import sqlite3
 from pathlib import Path
 
-from getmeajob.canada import in_canada
+from getmeajob.regions import in_regions
 from getmeajob.classify import classify_field, effective_level
 from getmeajob.filters import evaluate
-from getmeajob.jobfilters import JobFilters, province_matches, search_filters
+from getmeajob.jobfilters import REGION_CODES, JobFilters, province_matches, search_filters
 from getmeajob.models import Job
 from getmeajob.resume.intelligence import algorithm_hash, facts_hash, job_features, prepare, qualification_facts
 from getmeajob.resume.vocabulary import VOCABULARY_HASH
@@ -116,10 +116,10 @@ def run(job_db: Path, store, filters: JobFilters, weights: dict, scorer, offset:
             continue
         if query and query not in f"{job.role} {job.employer}".casefold():
             continue
-        if filters.canada_only:
-            # Only explicit Canadian evidence counts; a job with no location at all is Unknown.
-            canadian = in_canada(job.locations)
-            if canadian is False or (canadian is None and not filters.include_unknown):
+        if filters.region != "any":
+            # Only explicit country evidence counts; a job with no location at all is Unknown.
+            inside = in_regions(job.locations, REGION_CODES[filters.region])
+            if inside is False or (inside is None and not filters.include_unknown):
                 continue
         group, why = ("Other", "")
         if filters.fields:   # classification is only needed up front when filtering by field

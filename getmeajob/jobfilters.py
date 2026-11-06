@@ -19,10 +19,12 @@ LEVEL_VALUES = {level.casefold(): level for level in LEVELS}
 POSTED = {1: "Last 24 hours", 3: "3 days", 7: "7 days", 14: "14 days", 30: "30 days"}
 CURRENCIES = ("CAD", "USD", "EUR", "GBP")
 INTERVALS = {"year": "per year", "month": "per month", "week": "per week", "hour": "per hour"}
+REGIONS = {"canada": "Canada only", "us": "United States only", "both": "Canada and United States", "any": "Anywhere"}
+REGION_CODES = {"canada": ("canada",), "us": ("us",), "both": ("canada", "us"), "any": ()}
 SORTS = {"match": "Highest match", "recent": "Most recent", "company": "Company", "title": "Job title"}
 MAX_ITEMS, MAX_TEXT = 15, 60
 FIELD_KEYS = ("applied", "q", "field", "role", "exclude", "type", "arrangement", "level", "city", "province", "radius",
-              "remote_region", "unplaced", "canada", "salary", "currency", "interval", "posted", "company", "exclude_company", "min_score", "sort", "unknown")
+              "remote_region", "unplaced", "canada", "region", "salary", "currency", "interval", "posted", "company", "exclude_company", "min_score", "sort", "unknown")
 
 
 class FilterError(ValueError):
@@ -66,7 +68,7 @@ class JobFilters:
     minimum_score: int = 0
     sort: str = "recent"
     include_unknown: bool = True
-    canada_only: bool = True
+    region: str = "canada"
 
 
 def choices(raw: object, allowed: dict | tuple, label: str) -> tuple[str, ...]:
@@ -135,6 +137,10 @@ def parse(data) -> JobFilters:
     interval = text("interval") or "year"
     if currency not in CURRENCIES or interval not in INTERVALS:
         raise FilterError("Choose a currency and pay period from the lists.")
+    # "region" is current; the older "canada=0" switch (saved before US support) still means Anywhere.
+    region = text("region") or ("any" if str(one("canada", "1")) in ("0", "false", "False") else "canada")
+    if region not in REGIONS:
+        raise FilterError("Choose a region from the list.")
     radius = number(one("radius"), "Distance", 1, 20000)
     score = number(one("min_score"), "Minimum match", 0, 100)
     unknown = one("unknown", "1")
@@ -150,7 +156,7 @@ def parse(data) -> JobFilters:
         minimum_salary=number(one("salary"), "Minimum salary", 0, 10_000_000), currency=currency, interval=interval,
         posted_days=posted, companies=lines("company", r"[\n;]"), excluded_companies=lines("exclude_company", r"[\n;]"),
         minimum_score=int(score or 0), sort=sort, include_unknown=str(unknown) not in ("0", "false", "False"),
-        canada_only=str(one("canada", "1")) not in ("0", "false", "False"))
+        region=region)
 
 
 def load_preferences(raw: str | None) -> JobFilters:
@@ -200,8 +206,8 @@ def to_query(filters: JobFilters) -> dict:
         out["sort"] = filters.sort
     if not filters.include_unknown:
         out["unknown"] = "0"
-    if not filters.canada_only:
-        out["canada"] = "0"
+    if filters.region != d.region:
+        out["region"] = filters.region
     return out
 
 
@@ -272,7 +278,7 @@ def province_matches(locations: tuple[str, ...], province: str) -> bool:
 def chips(filters: JobFilters) -> list[str]:
     """Human-readable list of every active filter."""
     out = []
-    if filters.canada_only: out.append("Canada only")
+    if filters.region != "any": out.append(REGIONS[filters.region])
     if filters.q: out.append(f"Search: {filters.q}")
     if filters.fields: out.append("Field: " + ", ".join(filters.fields))
     if filters.roles: out.append("Role contains: " + ", ".join(filters.roles))

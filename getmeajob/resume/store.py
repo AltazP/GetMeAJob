@@ -15,7 +15,7 @@ class ProfileStore:
         self.path = directory / 'profiles.sqlite3'
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 5:
+            if version > 6:
                 raise ValueError('Private database is newer than this application.')
             db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -75,6 +75,15 @@ class ProfileStore:
                         PRAGMA user_version=5; COMMIT;""")
                 except Exception:
                     db.rollback(); raise
+            if version < 6:
+                # The user's own cover letters (text only), used as starting points that get tailored per job.
+                try:
+                    db.executescript("""BEGIN IMMEDIATE;
+                        CREATE TABLE IF NOT EXISTS cover_letters(id INTEGER PRIMARY KEY,label TEXT NOT NULL,filename TEXT NOT NULL,
+                            text TEXT NOT NULL,created TEXT NOT NULL);
+                        PRAGMA user_version=6; COMMIT;""")
+                except Exception:
+                    db.rollback(); raise
         os.chmod(self.path, 0o600)
 
     def connect(self):
@@ -102,6 +111,27 @@ class ProfileStore:
         with self.connect() as db:
             rows=db.execute('SELECT * FROM applications WHERE package_id=? ORDER BY id DESC',(package_id,)).fetchall()
         return [{**dict(r),'filled':json.loads(r['filled']),'needs':json.loads(r['needs'])} for r in rows]
+
+    MAX_COVER_LETTERS=10
+
+    def cover_letters(self):
+        with self.connect() as db:
+            return [dict(r) for r in db.execute('SELECT id,label,filename,text,created FROM cover_letters ORDER BY id DESC')]
+
+    def cover_letter(self,identity):
+        with self.connect() as db: row=db.execute('SELECT id,label,filename,text,created FROM cover_letters WHERE id=?',(identity,)).fetchone()
+        if not row: raise ValueError('Cover letter not found.')
+        return dict(row)
+
+    def add_cover_letter(self,label,filename,text):
+        label=' '.join(label.split())[:80] or 'My cover letter'; text=text.strip()
+        if not 40<=len(text)<=20000: raise ValueError('A cover letter must be between 40 and 20,000 characters.')
+        with self.connect() as db:
+            if db.execute('SELECT COUNT(*) FROM cover_letters').fetchone()[0]>=self.MAX_COVER_LETTERS: raise ValueError(f'At most {self.MAX_COVER_LETTERS} saved cover letters; delete one first.')
+            return db.execute('INSERT INTO cover_letters(label,filename,text,created) VALUES(?,?,?,?)',(label,filename[:120],text,utc_now())).lastrowid
+
+    def delete_cover_letter(self,identity):
+        with self.connect() as db: db.execute('DELETE FROM cover_letters WHERE id=?',(identity,))
 
     MAX_PRESETS=10
 
